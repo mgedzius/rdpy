@@ -23,7 +23,8 @@
 """
 
 import hashlib, hmac, struct, datetime
-import sspi
+from . import sspi
+from rdpy.core.type import encodeUnicode
 import rdpy.security.pyDes as pyDes
 import rdpy.security.rc4 as rc4
 from rdpy.security.rsa_wrapper import random
@@ -37,7 +38,7 @@ class MajorVersion(object):
     """
     WINDOWS_MAJOR_VERSION_5 = 0x05
     WINDOWS_MAJOR_VERSION_6 = 0x06
-    
+
 class MinorVersion(object):
     """
     @see: https://msdn.microsoft.com/en-us/library/cc236654.aspx
@@ -47,13 +48,13 @@ class MinorVersion(object):
     WINDOWS_MINOR_VERSION_1 = 0x01
     WINDOWS_MINOR_VERSION_2 = 0x02
     WINDOWS_MINOR_VERSION_3 = 0x03
-    
+
 class NTLMRevision(object):
     """
     @see: https://msdn.microsoft.com/en-us/library/cc236654.aspx
     """
     NTLMSSP_REVISION_W2K3 = 0x0F
-    
+
 class Negotiate(object):
     """
     @see: https://msdn.microsoft.com/en-us/library/cc236650.aspx
@@ -79,7 +80,7 @@ class Negotiate(object):
     NTLMSSP_REQUEST_TARGET = 0x00000004
     NTLM_NEGOTIATE_OEM = 0x00000002
     NTLMSSP_NEGOTIATE_UNICODE = 0x00000001
-    
+
 class AvId(object):
     """
     @see: https://msdn.microsoft.com/en-us/library/cc236646.aspx
@@ -95,7 +96,7 @@ class AvId(object):
     MsvAvSingleHost = 0x0008
     MsvAvTargetName = 0x0009
     MsvChannelBindings = 0x000A
-    
+
 def getPayLoadField(message, length, bufferOffset):
         if length == 0:
             return None
@@ -116,7 +117,7 @@ class Version(CompositeType):
         self.ProductBuild = UInt16Le(6002)
         self.Reserved = UInt24Le()
         self.NTLMRevisionCurrent = UInt8(NTLMRevision.NTLMSSP_REVISION_W2K3)
-        
+
 class AvPair(CompositeType):
     """
     @see: https://msdn.microsoft.com/en-us/library/cc236646.aspx
@@ -126,7 +127,7 @@ class AvPair(CompositeType):
         self.AvId = UInt16Le()
         self.AvLen = UInt16Le(lambda:sizeof(self.Value))
         self.Value = String(readLen = self.AvLen)
-        
+
 class MessageSignatureEx(CompositeType):
     """
     @summary: Signature for message
@@ -145,21 +146,21 @@ class NegotiateMessage(CompositeType):
     """
     def __init__(self):
         CompositeType.__init__(self)
-        self.Signature = String("NTLMSSP\x00", readLen = CallableValue(8), constant = True)
+        self.Signature = String(b"NTLMSSP\x00", readLen = CallableValue(8), constant = True)
         self.MessageType = UInt32Le(0x00000001, constant = True)
-        
+
         self.NegotiateFlags = UInt32Le()
-        
+
         self.DomainNameLen = UInt16Le()
         self.DomainNameMaxLen = UInt16Le(lambda:self.DomainNameLen.value)
         self.DomainNameBufferOffset = UInt32Le()
-        
+
         self.WorkstationLen = UInt16Le()
         self.WorkstationMaxLen = UInt16Le(lambda:self.WorkstationLen.value)
         self.WorkstationBufferOffset = UInt32Le()
-        
+
         self.Version = Version(conditional = lambda:(self.NegotiateFlags.value & Negotiate.NTLMSSP_NEGOTIATE_VERSION))
-        
+
         self.Payload = String()
 
 class ChallengeMessage(CompositeType):
@@ -169,31 +170,31 @@ class ChallengeMessage(CompositeType):
     """
     def __init__(self):
         CompositeType.__init__(self)
-        self.Signature = String("NTLMSSP\x00", readLen = CallableValue(8), constant = True)
+        self.Signature = String(b"NTLMSSP\x00", readLen = CallableValue(8), constant = True)
         self.MessageType = UInt32Le(0x00000002, constant = True)
-        
+
         self.TargetNameLen = UInt16Le()
         self.TargetNameMaxLen = UInt16Le(lambda:self.TargetNameLen.value)
         self.TargetNameBufferOffset = UInt32Le()
-        
+
         self.NegotiateFlags = UInt32Le()
-        
+
         self.ServerChallenge = String(readLen = CallableValue(8))
         self.Reserved = String("\x00" * 8, readLen = CallableValue(8))
-        
+
         self.TargetInfoLen = UInt16Le()
         self.TargetInfoMaxLen = UInt16Le(lambda:self.TargetInfoLen.value)
         self.TargetInfoBufferOffset = UInt32Le()
-        
+
         self.Version = Version(conditional = lambda:(self.NegotiateFlags.value & Negotiate.NTLMSSP_NEGOTIATE_VERSION))
         self.Payload = String()
-        
+
     def getTargetName(self):
         return getPayLoadField(self, self.TargetNameLen.value, self.TargetNameBufferOffset.value)
-    
+
     def getTargetInfo(self):
         return getPayLoadField(self, self.TargetInfoLen.value, self.TargetInfoBufferOffset.value)
-    
+
     def getTargetInfoAsAvPairArray(self):
         """
         @summary: Parse Target info field to retrieve array of AvPair
@@ -207,8 +208,8 @@ class ChallengeMessage(CompositeType):
             if avPair.AvId.value == AvId.MsvAvEOL:
                 return result
             result[avPair.AvId.value] = avPair.Value.value
-            
-        
+
+
 class AuthenticateMessage(CompositeType):
     """
     @summary: Last message in ntlm authentication
@@ -216,51 +217,51 @@ class AuthenticateMessage(CompositeType):
     """
     def __init__(self):
         CompositeType.__init__(self)
-        self.Signature = String("NTLMSSP\x00", readLen = CallableValue(8), constant = True)
+        self.Signature = String(b"NTLMSSP\x00", readLen = CallableValue(8), constant = True)
         self.MessageType = UInt32Le(0x00000003, constant = True)
-        
+
         self.LmChallengeResponseLen = UInt16Le()
         self.LmChallengeResponseMaxLen = UInt16Le(lambda:self.LmChallengeResponseLen.value)
         self.LmChallengeResponseBufferOffset = UInt32Le()
-        
+
         self.NtChallengeResponseLen = UInt16Le()
         self.NtChallengeResponseMaxLen = UInt16Le(lambda:self.NtChallengeResponseLen.value)
         self.NtChallengeResponseBufferOffset = UInt32Le()
-        
+
         self.DomainNameLen = UInt16Le()
         self.DomainNameMaxLen = UInt16Le(lambda:self.DomainNameLen.value)
         self.DomainNameBufferOffset = UInt32Le()
-        
+
         self.UserNameLen = UInt16Le()
         self.UserNameMaxLen = UInt16Le(lambda:self.UserNameLen.value)
         self.UserNameBufferOffset = UInt32Le()
-        
+
         self.WorkstationLen = UInt16Le()
         self.WorkstationMaxLen = UInt16Le(lambda:self.WorkstationLen.value)
         self.WorkstationBufferOffset = UInt32Le()
-        
+
         self.EncryptedRandomSessionLen = UInt16Le()
         self.EncryptedRandomSessionMaxLen = UInt16Le(lambda:self.EncryptedRandomSessionLen.value)
         self.EncryptedRandomSessionBufferOffset = UInt32Le()
-        
+
         self.NegotiateFlags = UInt32Le()
         self.Version = Version(conditional = lambda:(self.NegotiateFlags.value & Negotiate.NTLMSSP_NEGOTIATE_VERSION))
-        
+
         self.MIC = String("\x00" * 16, readLen = CallableValue(16))
         self.Payload = String()
-        
+
     def getUserName(self):
         return getPayLoadField(self, self.UserNameLen.value, self.UserNameBufferOffset.value)
-    
+
     def getDomainName(self):
         return getPayLoadField(self, self.DomainNameLen.value, self.DomainNameBufferOffset.value)
-    
+
     def getLmChallengeResponse(self):
         return getPayLoadField(self, self.LmChallengeResponseLen.value, self.LmChallengeResponseBufferOffset.value)
-    
+
     def getNtChallengeResponse(self):
         return getPayLoadField(self, self.NtChallengeResponseLen.value, self.NtChallengeResponseBufferOffset.value)
-    
+
     def getEncryptedRandomSession(self):
         return getPayLoadField(self, self.EncryptedRandomSessionLen.value, self.EncryptedRandomSessionBufferOffset.value)
 
@@ -277,37 +278,37 @@ def createAuthenticationMessage(NegFlag, domain, user, NtChallengeResponse, LmCh
     message.NegotiateFlags.value = NegFlag
     #fill message
     offset = sizeof(message)
-    
+
     message.DomainNameLen.value = len(domain)
     message.DomainNameBufferOffset.value = offset
     message.Payload.value += domain
     offset += len(domain)
-    
+
     message.UserNameLen.value = len(user)
     message.UserNameBufferOffset.value = offset
     message.Payload.value += user
     offset += len(user)
-    
+
     message.WorkstationLen.value = len(Workstation)
     message.WorkstationBufferOffset.value = offset
     message.Payload.value += Workstation
     offset += len(Workstation)
-    
+
     message.LmChallengeResponseLen.value = len(LmChallengeResponse)
     message.LmChallengeResponseBufferOffset.value = offset
     message.Payload.value += LmChallengeResponse
     offset += len(LmChallengeResponse)
-    
+
     message.NtChallengeResponseLen.value = len(NtChallengeResponse)
     message.NtChallengeResponseBufferOffset.value = offset
     message.Payload.value += NtChallengeResponse
     offset += len(NtChallengeResponse)
-    
+
     message.EncryptedRandomSessionLen.value = len(EncryptedRandomSessionKey)
     message.EncryptedRandomSessionBufferOffset.value = offset
     message.Payload.value += EncryptedRandomSessionKey
     offset += len(EncryptedRandomSessionKey)
-    
+
     return message
 
 def expandDesKey(key):
@@ -345,14 +346,15 @@ def DESL(key, data):
     @param key: {str} Des key
     @param data: {str} encrypted data
     """
-    return DES(key[0:7], data) + DES(key[7:14], data) + DES(key[14:16] + "\x00" * 5, data)
+    return DES(key[0:7], data) + DES(key[7:14], data) + DES(key[14:16] + b"\x00" * 5, data)
 
 def UNICODE(s):
     """
     @param s: source
     @return: {str} encoded in unicode
     """
-    return s.encode('utf-16le')
+    #return s.encode('utf-16-le')
+    return encodeUnicode(s)
 
 def MD4(s):
     """
@@ -374,9 +376,9 @@ def Z(m):
     """
     @summary: fill m zero in string
     @param m: {int} size of string
-    @return: \x00 * m 
+    @return: \x00 * m
     """
-    return "\x00" * m
+    return b"\x00" * m
 
 def RC4K(key, plaintext):
     """
@@ -399,15 +401,15 @@ def KXKEYv2(SessionBaseKey, LmChallengeResponse, ServerChallenge):
 
 def SEALKEY(ExportedSessionKey, client):
     if client:
-        return MD5(ExportedSessionKey + "session key to client-to-server sealing key magic constant\0")
+        return MD5(ExportedSessionKey + b"session key to client-to-server sealing key magic constant\0")
     else:
-        return MD5(ExportedSessionKey + "session key to server-to-client sealing key magic constant\0")
+        return MD5(ExportedSessionKey + b"session key to server-to-client sealing key magic constant\0")
 
 def SIGNKEY(ExportedSessionKey, client):
     if client:
-        return MD5(ExportedSessionKey + "session key to client-to-server signing key magic constant\0")
+        return MD5(ExportedSessionKey + b"session key to client-to-server signing key magic constant\0")
     else:
-        return MD5(ExportedSessionKey + "session key to server-to-client signing key magic constant\0")
+        return MD5(ExportedSessionKey + b"session key to server-to-client signing key magic constant\0")
 
 def HMAC_MD5(key, data):
     """
@@ -443,16 +445,16 @@ def ComputeResponsev2(ResponseKeyNT, ResponseKeyLM, ServerChallenge, ClientChall
     @param NegFlg: {int} Negotiation flags come from challenge message
     @see: https://msdn.microsoft.com/en-us/library/cc236700.aspx
     """
-    Responserversion = "\x01"
-    HiResponserversion = "\x01"
+    Responserversion = b"\x01"
+    HiResponserversion = b"\x01"
 
     temp = Responserversion + HiResponserversion + Z(6) + Time + ClientChallenge + Z(4) + ServerName
     NTProofStr = HMAC_MD5(ResponseKeyNT, ServerChallenge + temp)
     NtChallengeResponse = NTProofStr + temp
     LmChallengeResponse = HMAC_MD5(ResponseKeyLM, ServerChallenge + ClientChallenge) + ClientChallenge
-    
+
     SessionBaseKey = HMAC_MD5(ResponseKeyNT, NTProofStr)
-    
+
     return NtChallengeResponse, LmChallengeResponse, SessionBaseKey
 
 def MAC(handle, SigningKey, SeqNum, Message):
@@ -466,13 +468,13 @@ def MAC(handle, SigningKey, SeqNum, Message):
     """
     signature = MessageSignatureEx()
     signature.SeqNum.value = SeqNum
-    
+
     #write the SeqNum
     s = Stream()
     s.writeType(signature.SeqNum)
-    
+
     signature.Checksum.value = rc4.crypt(handle, HMAC_MD5(SigningKey, s.getvalue() + Message)[:8])
-    
+
     return signature
 
 def MIC(ExportedSessionKey, negotiateMessage, challengeMessage, authenticateMessage):
@@ -482,12 +484,12 @@ def MIC(ExportedSessionKey, negotiateMessage, challengeMessage, authenticateMess
     @param challengeMessage: {ChallengeMessage}
     @param authenticateMessage: {AuthenticateMessage}
     @return: {str} signature
-    @see: https://msdn.microsoft.com/en-us/library/cc236676.aspx 
+    @see: https://msdn.microsoft.com/en-us/library/cc236676.aspx
     """
     s = Stream()
     s.writeType((negotiateMessage, challengeMessage, authenticateMessage))
     return HMAC_MD5(ExportedSessionKey, s.getvalue())
-    
+
 class NTLMv2(sspi.IAuthenticationProtocol):
     """
     @summary: Handle NTLMv2 Authentication
@@ -500,12 +502,12 @@ class NTLMv2(sspi.IAuthenticationProtocol):
         #https://msdn.microsoft.com/en-us/library/cc236700.aspx
         self._ResponseKeyNT = NTOWFv2(password, user, domain)
         self._ResponseKeyLM = LMOWFv2(password, user, domain)
-        
+
         #For MIC computation
         self._negotiateMessage = None
         self._challengeMessage = None
         self._authenticateMessage = None
-    
+
     def getNegotiateMessage(self):
         """
         @summary: generate first handshake messgae
@@ -521,7 +523,7 @@ class NTLMv2(sspi.IAuthenticationProtocol):
                                         Negotiate.NTLMSSP_REQUEST_TARGET |
                                         Negotiate.NTLMSSP_NEGOTIATE_UNICODE)
         return self._negotiateMessage
-    
+
     def getAuthenticateMessage(self, s):
         """
         @summary: Client last handshake message
@@ -531,45 +533,45 @@ class NTLMv2(sspi.IAuthenticationProtocol):
         """
         self._challengeMessage = ChallengeMessage()
         s.readType(self._challengeMessage)
-        
+
         ServerChallenge = self._challengeMessage.ServerChallenge.value
         ClientChallenge = random(64)
-        
+
         computeMIC = False
         ServerName = self._challengeMessage.getTargetInfo()
         infos = self._challengeMessage.getTargetInfoAsAvPairArray()
-        if infos.has_key(AvId.MsvAvTimestamp):
+        if AvId.MsvAvTimestamp in infos:
             Timestamp = infos[AvId.MsvAvTimestamp]
             computeMIC = True
         else:
             Timestamp = CurrentFileTimes()
-    
-        
+
+
         NtChallengeResponse, LmChallengeResponse, SessionBaseKey = ComputeResponsev2(self._ResponseKeyNT, self._ResponseKeyLM, ServerChallenge, ClientChallenge, Timestamp, ServerName)
         KeyExchangeKey = KXKEYv2(SessionBaseKey, LmChallengeResponse, ServerChallenge)
         ExportedSessionKey = random(128)
         EncryptedRandomSessionKey = RC4K(KeyExchangeKey, ExportedSessionKey)
-        
+
         domain, user = self._domain, self._user
         if self._challengeMessage.NegotiateFlags.value & Negotiate.NTLMSSP_NEGOTIATE_UNICODE:
             self._enableUnicode = True
             domain, user = UNICODE(domain), UNICODE(user)
-        self._authenticateMessage = createAuthenticationMessage(self._challengeMessage.NegotiateFlags.value, domain, user, NtChallengeResponse, LmChallengeResponse, EncryptedRandomSessionKey, "")
-        
+        self._authenticateMessage = createAuthenticationMessage(self._challengeMessage.NegotiateFlags.value, domain, user, NtChallengeResponse, LmChallengeResponse, EncryptedRandomSessionKey, b"")
+
         if computeMIC:
             self._authenticateMessage.MIC.value = MIC(ExportedSessionKey, self._negotiateMessage, self._challengeMessage, self._authenticateMessage)
         else:
             self._authenticateMessage.MIC._conditional = lambda:False
-        
+
         ClientSigningKey = SIGNKEY(ExportedSessionKey, True)
         ServerSigningKey = SIGNKEY(ExportedSessionKey, False)
         ClientSealingKey = SEALKEY(ExportedSessionKey, True)
         ServerSealingKey = SEALKEY(ExportedSessionKey, False)
-        
+
         interface = NTLMv2SecurityInterface(rc4.RC4Key(ClientSealingKey), rc4.RC4Key(ServerSealingKey), ClientSigningKey, ServerSigningKey)
-        
+
         return self._authenticateMessage, interface
-    
+
     def getEncodedCredentials(self):
         """
         @summary: return encoded credentials accorded with authentication protocol nego
@@ -579,7 +581,7 @@ class NTLMv2(sspi.IAuthenticationProtocol):
             return UNICODE(self._domain), UNICODE(self._user), UNICODE(self._password)
         else:
             return self._domain, self._user, self._password
-        
+
 
 class NTLMv2SecurityInterface(sspi.IGenericSecurityService):
     """
@@ -597,7 +599,7 @@ class NTLMv2SecurityInterface(sspi.IGenericSecurityService):
         self._signingKey = signingKey
         self._verifyKey = verifyKey
         self._seqNum = 0
-        
+
     def GSS_WrapEx(self, data):
         """
         @summary: Encrypt function for NTLMv2 security service
@@ -610,7 +612,7 @@ class NTLMv2SecurityInterface(sspi.IGenericSecurityService):
         s = Stream()
         s.writeType(signature)
         return s.getvalue() + encryptedData
-    
+
     def GSS_UnWrapEx(self, data):
         """
         @summary: decrypt data with key exchange in Authentication protocol
@@ -620,16 +622,16 @@ class NTLMv2SecurityInterface(sspi.IGenericSecurityService):
         message = String()
         s = Stream(data)
         s.readType((signature, message))
-        
+
         #decrypt message
         plaintextMessage = rc4.crypt(self._decryptHandle, message.value)
         checksum = rc4.crypt(self._decryptHandle, signature.Checksum.value)
-        
+
         #recompute checksum
         t = Stream()
         t.writeType(signature.SeqNum)
         verify = HMAC_MD5(self._verifyKey, t.getvalue() + plaintextMessage)[:8]
         if verify != checksum:
             raise error.InvalidExpectedDataException("NTLMv2SecurityInterface : Invalid checksum")
-        
+
         return plaintextMessage

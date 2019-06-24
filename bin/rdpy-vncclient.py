@@ -18,18 +18,19 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-"""
+__desc__="""
 example of use rdpy as VNC client
 """
 
-import sys, os, getopt
-from PyQt4 import QtGui
-from rdpy.ui.qt4 import RFBClientQt
+import sys, os, argparse, collections
+from PyQt5.QtWidgets import QApplication, QWidget, QMessageBox
+from rdpy.ui.qt5 import RFBClientQt
 from rdpy.protocol.rfb import rfb
 
 import rdpy.core.log as log
 log._LOG_LEVEL = log.Level.INFO
-        
+
+
 class RFBClientQtFactory(rfb.ClientFactory):
     """
     @summary: Factory create a VNC GUI client
@@ -39,7 +40,7 @@ class RFBClientQtFactory(rfb.ClientFactory):
         @param password: password for VNC authentication
         """
         self._password = password
-        
+
     def buildObserver(self, controller, addr):
         """
         @summary: Build RFB Client observer
@@ -55,56 +56,61 @@ class RFBClientQtFactory(rfb.ClientFactory):
         self._w.setWindowTitle('rdpy-vncclient')
         self._w.show()
         return client
-        
+
     def clientConnectionLost(self, connector, reason):
         """
         @summary: Connection lost event
         @param connector: twisted connector use for vnc connection (use reconnect to restart connection)
         @param reason: str use to advertise reason of lost connection
         """
-        QtGui.QMessageBox.warning(self._w, "Warning", "Lost connection : %s"%reason)
+        QMessageBox.warning(self._w, "Warning", "Lost connection : %s"%reason)
         reactor.stop()
         app.exit()
-        
+
     def clientConnectionFailed(self, connector, reason):
         """
         @summary: Connection failed event
         @param connector: twisted connector use for vnc connection (use reconnect to restart connection)
         @param reason: str use to advertise reason of lost connection
         """
-        QtGui.QMessageBox.warning(self._w, "Warning", "Connection failed : %s"%reason)
+        QMessageBox.warning(self._w, "Warning", "Connection failed : %s"%reason)
         reactor.stop()
         app.exit()
-        
-if __name__ == '__main__':
-    
-    #default script argument
-    password = ""
-    
-    try:
-        opts, args = getopt.getopt(sys.argv[1:], "hp:")
-    except getopt.GetoptError:
-        help()
-    for opt, arg in opts:
-        if opt == "-h":
-            help()
-            sys.exit()
-        elif opt == "-p":
-            password = arg
-            
-    if ':' in args[0]:
-        ip, port = args[0].split(':')
+
+
+def parse_target_argument(x):
+    Target = collections.namedtuple('Target', ['ip', 'port'])
+    if ':' in x:
+        ip, port = x.split(':')
     else:
-        ip, port = args[0], "5900"
-        
+        ip, port = x, "5900"
+    return Target(ip, int(port))
+
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(
+        description = __desc__,
+        formatter_class = argparse.ArgumentDefaultsHelpFormatter
+    )
+
+    parser.add_argument('--debug', action="store_true", default=False, help="Enable debug output [default : %(default)s]")
+    parser.add_argument('-p', '--password', type=str, default="", help="password")
+    parser.add_argument("target", metavar="IP[:PORT]", type=parse_target_argument, help="Specify the VNC server. If the port is not specified, the default port (tcp/5900) will be used")
+    args = parser.parse_args()
+
+    if args.debug:
+        log._LOG_LEVEL = log.Level.DEBUG
+        log.debug("Debug mode")
+
     #create application
-    app = QtGui.QApplication(sys.argv)
-    
-    #add qt4 reactor
-    import qt4reactor
-    qt4reactor.install()
+    app = QApplication(sys.argv)
+
+    #add qt5 reactor
+    import qt5reactor
+    qt5reactor.install()
 
     from twisted.internet import reactor
-    reactor.connectTCP(ip, int(port), RFBClientQtFactory(password))
+    reactor.connectTCP(args.target.ip, args.target.port, RFBClientQtFactory(args.password))
     reactor.runReturn()
     app.exec_()

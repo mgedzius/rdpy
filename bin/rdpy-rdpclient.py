@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 #
 # Copyright (c) 2014-2015 Sylvain Peyrefitte
 #
@@ -17,21 +17,28 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
-"""
-example of use rdpy as rdp client
-"""
 
-import sys, os, getopt, socket
 
-from PyQt4 import QtGui, QtCore
-from rdpy.ui.qt4 import RDPClientQt
+import sys
+import os
+import argparse
+import socket
+import collections
+
+from PyQt5 import QtWidgets
+from PyQt5.QtWidgets import QApplication
+
+from rdpy.ui.qt5 import RDPClientQt
 from rdpy.protocol.rdp import rdp
 from rdpy.core.error import RDPSecurityNegoFail
 from rdpy.core import rss
 
 import rdpy.core.log as log
-log._LOG_LEVEL = log.Level.INFO
 
+log._LOG_LEVEL = log.Level.INFO
+__desc__ = """
+example of use rdpy as rdp client
+"""
 
 class RDPClientQtRecorder(RDPClientQt):
     """
@@ -47,7 +54,7 @@ class RDPClientQtRecorder(RDPClientQt):
         RDPClientQt.__init__(self, controller, width, height)
         self._screensize = width, height
         self._rssRecorder = rssRecorder
-        
+
     def onUpdate(self, destLeft, destTop, destRight, destBottom, width, height, bitsPerPixel, isCompress, data):
         """
         @summary: Notify bitmap update
@@ -64,21 +71,21 @@ class RDPClientQtRecorder(RDPClientQt):
         #record update
         self._rssRecorder.update(destLeft, destTop, destRight, destBottom, width, height, bitsPerPixel, rss.UpdateFormat.BMP if isCompress else rss.UpdateFormat.RAW, data)
         RDPClientQt.onUpdate(self, destLeft, destTop, destRight, destBottom, width, height, bitsPerPixel, isCompress, data)
-    
+
     def onReady(self):
         """
         @summary: Call when stack is ready
         """
         self._rssRecorder.screen(self._screensize[0], self._screensize[1], self._controller.getColorDepth())
         RDPClientQt.onReady(self)
-          
+
     def onClose(self):
         """
         @summary: Call when stack is close
         """
         self._rssRecorder.close()
         RDPClientQt.onClose(self)
-        
+
     def closeEvent(self, e):
         """
         @summary: Convert Qt close widget event into close stack event
@@ -107,23 +114,20 @@ class RDPClientQtFactory(rdp.ClientFactory):
         self._width = width
         self._height = height
         self._username = username
-        self._passwod = password
+        self._password = password
         self._domain = domain
         self._fullscreen = fullscreen
         self._keyboardLayout = keyboardLayout
         self._optimized = optimized
         self._nego = security == "nego"
         self._recodedPath = recodedPath
-        if self._nego:
-            #compute start nego nla need credentials
-            if username != "" and password != "":
-                self._security = rdp.SecurityLevel.RDP_LEVEL_NLA
-            else:
-                self._security = rdp.SecurityLevel.RDP_LEVEL_SSL
-        else:
-            self._security = security
+        self._security = rdp.SecurityLevel.RDP_LEVEL_SSL
+        if self._nego and ( username != "" and password != "" ):
+            self._security = rdp.SecurityLevel.RDP_LEVEL_NLA
+        elif security == "rdp":
+            self._security = rdp.SecurityLevel.RDP_LEVEL_RDP
         self._w = None
-        
+
     def buildObserver(self, controller, addr):
         """
         @summary:  Build RFB observer
@@ -144,18 +148,18 @@ class RDPClientQtFactory(rdp.ClientFactory):
             self._w.showFullScreen()
         else:
             self._w.show()
-        
+
         controller.setUsername(self._username)
-        controller.setPassword(self._passwod)
+        controller.setPassword(self._password)
         controller.setDomain(self._domain)
         controller.setKeyboardLayout(self._keyboardLayout)
         controller.setHostname(socket.gethostname())
         if self._optimized:
             controller.setPerformanceSession()
         controller.setSecurityLevel(self._security)
-        
+
         return self._client
-    
+
     def clientConnectionLost(self, connector, reason):
         """
         @summary: Connection lost event
@@ -169,13 +173,13 @@ class RDPClientQtFactory(rdp.ClientFactory):
             self._nego = False
             self._security = rdp.SecurityLevel.RDP_LEVEL_RDP
             self._client._widget.hide()
-            connector.connect()
+            connect.connect()
             return
-        
+
         log.info("Lost connection : %s"%reason)
         reactor.stop()
         app.exit()
-        
+
     def clientConnectionFailed(self, connector, reason):
         """
         @summary: Connection failed event
@@ -185,104 +189,91 @@ class RDPClientQtFactory(rdp.ClientFactory):
         log.info("Connection failed : %s"%reason)
         reactor.stop()
         app.exit()
-        
+
 def autoDetectKeyboardLayout():
     """
     @summary: try to auto detect keyboard layout
     """
     try:
-        if os.name == 'posix':    
+        if os.name == 'posix':
             from subprocess import check_output
             result = check_output(["setxkbmap", "-print"])
-            if 'azerty' in result:
+            if b'azerty' in result:
                 return "fr"
         elif os.name == 'nt':
             import win32api, win32con, win32process
             from ctypes import windll
-            w = windll.user32.GetForegroundWindow() 
-            tid = windll.user32.GetWindowThreadProcessId(w, 0) 
+            w = windll.user32.GetForegroundWindow()
+            tid = windll.user32.GetWindowThreadProcessId(w, 0)
             result = windll.user32.GetKeyboardLayout(tid)
             log.info(result)
             if result == 0x40c040c:
                 return "fr"
     except Exception as e:
-        log.info("failed to auto detect keyboard layout " + str(e))
-        pass
+        log.info("failed to auto detect keyboard layout: {}".format(e))
+
     return "en"
-        
-def help():
-    print """
-    Usage: rdpy-rdpclient [options] ip[:port]"
-    \t-u: user name
-    \t-p: password
-    \t-d: domain
-    \t-w: width of screen [default : 1024]
-    \t-l: height of screen [default : 800]
-    \t-f: enable full screen mode [default : False]
-    \t-k: keyboard layout [en|fr] [default : en]
-    \t-o: optimized session (disable costly effect) [default : False]
-    \t-r: rss_filepath Recorded Session Scenario [default : None]
-    """
-        
-if __name__ == '__main__':
-    
-    #default script argument
-    username = ""
-    password = ""
-    domain = ""
-    width = 1024
-    height = 800
-    fullscreen = False
-    optimized = False
-    recodedPath = None
-    keyboardLayout = autoDetectKeyboardLayout()
-    
-    try:
-        opts, args = getopt.getopt(sys.argv[1:], "hfou:p:d:w:l:k:r:")
-    except getopt.GetoptError:
-        help()
-    for opt, arg in opts:
-        if opt == "-h":
-            help()
-            sys.exit()
-        elif opt == "-u":
-            username = arg
-        elif opt == "-p":
-            password = arg
-        elif opt == "-d":
-            domain = arg
-        elif opt == "-w":
-            width = int(arg)
-        elif opt == "-l":
-            height = int(arg)
-        elif opt == "-f":
-            fullscreen = True
-        elif opt == "-o":
-            optimized = True
-        elif opt == "-k":
-            keyboardLayout = arg
-        elif opt == "-r":
-            recodedPath = arg
-            
-    if ':' in args[0]:
-        ip, port = args[0].split(':')
+
+
+def parse_target_argument(x):
+    Target = collections.namedtuple('Target', ['ip', 'port'])
+    if ':' in x:
+        ip, port = x.split(':')
     else:
-        ip, port = args[0], "3389"
-    
-    #create application
-    app = QtGui.QApplication(sys.argv)
-    
-    #add qt4 reactor
-    import qt4reactor
-    qt4reactor.install()
-    
-    if fullscreen:
-        width = QtGui.QDesktopWidget().screenGeometry().width()
-        height = QtGui.QDesktopWidget().screenGeometry().height()
-    
-    log.info("keyboard layout set to %s"%keyboardLayout)
-    
+        ip, port = x, "3389"
+    return Target(ip, int(port))
+
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(
+        description = __desc__,
+        formatter_class = argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument('-u', '--username', type=str, default="", help="username")
+    parser.add_argument('-p', '--password', type=str, default="", help="password")
+    parser.add_argument('-d', '--domain', type=str, default="", help="domain")
+    parser.add_argument('-s', '--security-level', choices=("ssl", "rdp", "nego"), default="rdp", help="set protocol security layer")
+    parser.add_argument('--debug', action="store_true", default=False, help="Enable debug output [default : %(default)s]")
+    parser.add_argument('--width', type=int, default=1024, help="width of screen [default : %(default)s]")
+    parser.add_argument('--height', type=int, default=800, help="height of screen [default : %(default)s]")
+    parser.add_argument('--fullscreen', type=bool, default=False, help="enable full screen mode [default : %(default)s]")
+    parser.add_argument('--keyboard-layout', type=str, default=autoDetectKeyboardLayout(), choices=("en", "fr"), help="Keyboard layout [default : %(default)s]")
+    parser.add_argument('--optimized-session', type=bool, default=False, help="Optimized session (disable costly effect) [default : %(default)s]")
+    parser.add_argument('--rss-filepath', default=None, help="Recorded Session Scenario [default : %(default)s]")
+    parser.add_argument("target", metavar="IP[:PORT]", type=parse_target_argument, help="Specify the RDP server. If the port is not specified, the default port (tcp/3389) will be used")
+    args = parser.parse_args()
+
+    if args.debug:
+        log._LOG_LEVEL = log.Level.DEBUG
+        log.debug("Debug mode")
+
+    # create application and reactor
+    app = QtWidgets.QApplication(sys.argv)
+
+    import qt5reactor
+    qt5reactor.install()
+
+    if args.fullscreen:
+        width = QtWidgets.QDesktopWidget().screenGeometry().width()
+        height = QtWidgets.QDesktopWidget().screenGeometry().height()
+
+    log.info("keyboard layout set to {:s}".format(args.keyboard_layout))
+
+    rdpcli = RDPClientQtFactory(
+        args.width,
+        args.height,
+        args.username,
+        args.password,
+        args.domain,
+        args.fullscreen,
+        args.keyboard_layout,
+        args.optimized_session,
+        args.security_level,
+        args.rss_filepath
+    )
+
     from twisted.internet import reactor
-    reactor.connectTCP(ip, int(port), RDPClientQtFactory(width, height, username, password, domain, fullscreen, keyboardLayout, optimized, "nego", recodedPath))
+    reactor.connectTCP(args.target.ip, int(args.target.port), rdpcli)
     reactor.runReturn()
     app.exec_()

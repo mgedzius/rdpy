@@ -36,7 +36,7 @@ class Class(object):
     BER_CLASS_APPL = 0x40
     BER_CLASS_CTXT = 0x80
     BER_CLASS_PRIV = 0xC0
-        
+
 class Tag(object):
     BER_TAG_MASK = 0x1F
     BER_TAG_BOOLEAN = 0x01
@@ -59,7 +59,7 @@ def berPC(pc):
         return BerPc.BER_CONSTRUCT
     else:
         return BerPc.BER_PRIMITIVE
-    
+
 def readLength(s):
     """
     @summary: Read length of BER structure
@@ -94,7 +94,7 @@ def writeLength(size):
         return (UInt8(0x82), UInt16Be(size))
     else:
         return UInt8(size)
-    
+
 def readUniversalTag(s, tag, pc):
     """
     @summary: Read tag of BER packet
@@ -111,7 +111,7 @@ def writeUniversalTag(tag, pc):
     @summary: Return universal tag byte
     @param tag: tag class attributes
     @param pc: boolean
-    @return: UInt8 
+    @return: UInt8
     """
     return UInt8((Class.BER_CLASS_UNIV | berPC(pc)) | (Tag.BER_TAG_MASK & tag))
 
@@ -133,20 +133,20 @@ def readApplicationTag(s, tag):
     else:
         if byte.value != ((Class.BER_CLASS_APPL | BerPc.BER_CONSTRUCT) | (Tag.BER_TAG_MASK & tag)):
             raise InvalidExpectedDataException()
-        
+
     return readLength(s)
 
 def writeApplicationTag(tag, size):
     """
     @summary: Return structure that represent BER application tag
     @param tag: int python that match an uint8(0xff)
-    @param size: size to rest of packet  
+    @param size: size to rest of packet
     """
     if tag > 30:
         return (UInt8((Class.BER_CLASS_APPL | BerPc.BER_CONSTRUCT) | Tag.BER_TAG_MASK), UInt8(tag), writeLength(size))
     else:
         return (UInt8((Class.BER_CLASS_APPL | BerPc.BER_CONSTRUCT) | (Tag.BER_TAG_MASK & tag)), writeLength(size))
-    
+
 def readBoolean(s):
     """
     @summary: Return boolean
@@ -181,9 +181,9 @@ def readInteger(s):
     """
     if not readUniversalTag(s, Tag.BER_TAG_INTEGER, False):
         raise InvalidExpectedDataException("Bad integer tag")
-    
+
     size = readLength(s)
-    
+
     if size == 1:
         integer = UInt8()
         s.readType(integer)
@@ -204,12 +204,12 @@ def readInteger(s):
         return integer.value
     else:
         raise InvalidExpectedDataException("Wrong integer size")
-    
+
 def writeInteger(value):
     """
     @summary: Write integer value
     @param param: INT or Python long
-    @return: BER integer block 
+    @return: BER integer block
     """
     if value <= 0xff:
         return (writeUniversalTag(Tag.BER_TAG_INTEGER, False), writeLength(1), UInt8(value))
@@ -233,7 +233,7 @@ def writeOctetstring(value):
     """
     @summary: Write string in BER representation
     @param value: string
-    @return: BER octet string block 
+    @return: BER octet string block
     """
     return (writeUniversalTag(Tag.BER_TAG_OCTET_STRING, False), writeLength(len(value)), String(value))
 
@@ -255,6 +255,6 @@ def writeEnumerated(enumerated):
     """
     @summary: Write enumerated structure
     @param s: Stream
-    @return: BER enumerated block 
+    @return: BER enumerated block
     """
     return (writeUniversalTag(Tag.BER_TAG_ENUMERATED, False), writeLength(1), UInt8(enumerated))

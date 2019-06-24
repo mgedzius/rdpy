@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 #
 # Copyright (c) 2014-2015 Sylvain Peyrefitte
 #
@@ -18,21 +18,20 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-"""
+__desc__ = """
 example of use rdpy
 take screenshot of login page
 """
 
-import getopt
-import os
-import sys
+import os, sys, argparse, tempfile, collections
 
-from PyQt4 import QtCore, QtGui
+from PyQt5 import QtWidgets, QtGui
+from PyQt5.QtWidgets import QApplication
 from rdpy.protocol.rdp import rdp
-from rdpy.ui.qt4 import RDPBitmapToQtImage
-import rdpy.core.log as log
+from rdpy.ui.qt5 import RDPBitmapToQtImage
 from rdpy.core.error import RDPSecurityNegoFail
-from twisted.internet import task
+
+import rdpy.core.log as log
 
 # set log level
 log._LOG_LEVEL = log.Level.INFO
@@ -45,7 +44,7 @@ class RDPScreenShotFactory(rdp.ClientFactory):
     __INSTANCE__ = 0
     __STATE__ = []
 
-    def __init__(self, reactor, app, width, height, path, timeout):
+    def __init__(self, reactor, app, args, path):
         """
         @param reactor: twisted reactor
         @param width: {integer} width of screen
@@ -56,12 +55,14 @@ class RDPScreenShotFactory(rdp.ClientFactory):
         RDPScreenShotFactory.__INSTANCE__ += 1
         self._reactor = reactor
         self._app = app
-        self._width = width
-        self._height = height
+        self._username = args.username
+        self._password = args.password
+        self._domain = args.domain
+        self._width = args.width
+        self._height = args.height
         self._path = path
-        self._timeout = timeout
-        #NLA server can't be screenshooting
-        self._security = rdp.SecurityLevel.RDP_LEVEL_SSL
+        self._timeout = args.timeout
+        self._security = rdp.SecurityLevel.RDP_LEVEL_RDP if args.security_level == "rdp" else rdp.SecurityLevel.RDP_LEVEL_SSL
 
     def clientConnectionLost(self, connector, reason):
         """
@@ -69,13 +70,13 @@ class RDPScreenShotFactory(rdp.ClientFactory):
         @param connector: twisted connector use for rdp connection (use reconnect to restart connection)
         @param reason: str use to advertise reason of lost connection
         """
-        if reason.type == RDPSecurityNegoFail and self._security != "rdp":
+        if reason.type == RDPSecurityNegoFail and self._security != rdp.SecurityLevel.RDP_LEVEL_RDP:
             log.info("due to RDPSecurityNegoFail try standard security layer")
             self._security = rdp.SecurityLevel.RDP_LEVEL_RDP
             connector.connect()
             return
 
-        log.info("connection lost : %s" % reason)
+        log.warning("connection lost : %s" % reason)
         RDPScreenShotFactory.__STATE__.append((connector.host, connector.port, reason))
         RDPScreenShotFactory.__INSTANCE__ -= 1
         if(RDPScreenShotFactory.__INSTANCE__ == 0):
@@ -88,7 +89,7 @@ class RDPScreenShotFactory(rdp.ClientFactory):
         @param connector: twisted connector use for rdp connection (use reconnect to restart connection)
         @param reason: str use to advertise reason of lost connection
         """
-        log.info("connection failed : %s"%reason)
+        log.error("connection failed : %s" % reason)
         RDPScreenShotFactory.__STATE__.append((connector.host, connector.port, reason))
         RDPScreenShotFactory.__INSTANCE__ -= 1
         if(RDPScreenShotFactory.__INSTANCE__ == 0):
@@ -123,11 +124,10 @@ class RDPScreenShotFactory(rdp.ClientFactory):
 
             def onUpdate(self, destLeft, destTop, destRight, destBottom, width, height, bitsPerPixel, isCompress, data):
                 """
-                @summary: callback use when bitmap is received 
+                @summary: callback use when bitmap is received
                 """
                 image = RDPBitmapToQtImage(width, height, bitsPerPixel, isCompress, data);
                 with QtGui.QPainter(self._buffer) as qp:
-                # draw image
                     qp.drawImage(destLeft, destTop, image, 0, 0, destRight - destLeft + 1, destBottom - destTop + 1)
                 if not self._startTimeout:
                     self._startTimeout = False
@@ -156,11 +156,16 @@ class RDPScreenShotFactory(rdp.ClientFactory):
             def checkUpdate(self):
                 self._controller.close();
 
-        controller.setScreen(self._width, self._height);
+        controller.setUsername(self._username)
+        controller.setPassword(self._password)
+        controller.setDomain(self._domain)
+        controller.setKeyboardLayout("en")
         controller.setSecurityLevel(self._security)
+        controller.setScreen(self._width, self._height);
         return ScreenShotObserver(controller, self._width, self._height, self._path, self._timeout, self._reactor)
 
-def main(width, height, path, timeout, hosts):
+
+def main(args):
     """
     @summary: main algorithm
     @param height: {integer} height of screenshot
@@ -169,57 +174,57 @@ def main(width, height, path, timeout, hosts):
     @param hosts: {list(str(ip[:port]))}
     @return: {list(tuple(ip, port, Failure instance)} list of connection state
     """
-    #create application
-    app = QtGui.QApplication(sys.argv)
 
-    #add qt4 reactor
-    import qt4reactor
-    qt4reactor.install()
+    # create application and reactor
+    app = QtWidgets.QApplication(sys.argv)
+
+    #add qt5 reactor
+    import qt5reactor
+    qt5reactor.install()
 
     from twisted.internet import reactor
 
-    for host in hosts:      
-        if ':' in host:
-            ip, port = host.split(':')
-        else:
-            ip, port = host, "3389"
-
-        reactor.connectTCP(ip, int(port), RDPScreenShotFactory(reactor, app, width, height, path + "%s.jpg" % ip, timeout))
+    for host in args.targets:
+        outfile = os.sep.join([args.output_path, "{:s}.jpg".format(host.ip)])
+        rdpcli = RDPScreenShotFactory(reactor, app, args, outfile)
+        reactor.connectTCP(host.ip, host.port, rdpcli)
 
     reactor.runReturn()
     app.exec_()
     return RDPScreenShotFactory.__STATE__
 
 
-def help():
-    print "Usage: rdpy-rdpscreenshot [options] ip[:port]"
-    print "\t-w: width of screen default value is 1024"
-    print "\t-l: height of screen default value is 800"
-    print "\t-o: file path of screenshot default(/tmp/rdpy-rdpscreenshot.jpg)"
-    print "\t-t: timeout of connection without any updating order (default is 2s)"
+def parse_target_argument(x):
+    Target = collections.namedtuple('Target', ['ip', 'port'])
+    if ':' in x:
+        ip, port = x.split(':')
+    else:
+        ip, port = x, "3389"
+    return Target(ip, int(port))
+
+
+
 
 if __name__ == '__main__':
-    # default script argument
-    width = 1024
-    height = 800
-    path = "/tmp/"
-    timeout = 5.0
 
-    try:
-        opts, args = getopt.getopt(sys.argv[1:], "hw:l:o:t:")
-    except getopt.GetoptError:
-        help()
-    for opt, arg in opts:
-        if opt == "-h":
-            help()
-            sys.exit()
-        elif opt == "-w":
-            width = int(arg)
-        elif opt == "-l":
-            height = int(arg)
-        elif opt == "-o":
-            path = arg
-        elif opt == "-t":
-            timeout = float(arg)
+    parser = argparse.ArgumentParser(
+        description = __desc__,
+        formatter_class = argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument('-u', '--username', type=str, default="", help="username")
+    parser.add_argument('-p', '--password', type=str, default="", help="password")
+    parser.add_argument('-d', '--domain', type=str, default="", help="domain")
+    parser.add_argument('-s', '--security-level', choices=("ssl", "rdp"), default="rdp", help="set protocol security layer")
+    parser.add_argument('--debug', action="store_true", default=False, help="Enable debug output [default : %(default)s]")
+    parser.add_argument('--width', type=int, default=1024, help="width of screen [default : %(default)s]")
+    parser.add_argument('--height', type=int, default=800, help="height of screen [default : %(default)s]")
+    parser.add_argument('--timeout', type=float, default=5.0, help="timeout before snap [default : %(default)s]")
+    parser.add_argument('--output-path', type=str, default=tempfile.gettempdir(), help="the output directory [default : %(default)s]")
+    parser.add_argument("targets", metavar="IP[:PORT]", nargs='+', type=parse_target_argument, help="Specify the RDP server(s). If the port is not specified, the default port (tcp/3389) will be used")
+    args = parser.parse_args()
 
-    main(width, height, path, timeout, args)
+    if args.debug:
+        log._LOG_LEVEL = log.Level.DEBUG
+        log.debug("Debug mode")
+
+    main(args)

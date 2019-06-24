@@ -52,7 +52,7 @@ def writeLength(value):
         return UInt16Be(value | 0x8000)
     else:
         return UInt8(value)
-    
+
 def readChoice(s):
     """
     @summary: read per choice format
@@ -157,7 +157,7 @@ def writeInteger(value):
         return (writeLength(2), UInt16Be(value))
     else:
         return (writeLength(4), UInt32Be(value))
-    
+
 def readInteger16(s, minimum = 0):
     """
     @summary: read UInt16Be from stream s and add minimum
@@ -201,7 +201,7 @@ def readObjectIdentifier(s, oid):
     a_oid[4] = t12.value
     s.readType(t12)
     a_oid[5] = t12.value
-    
+
     if list(oid) != a_oid:
         raise InvalidExpectedDataException("invalid object identifier")
 
@@ -234,20 +234,20 @@ def writeNumericString(nStr, minValue):
     mlength = minValue
     if length - minValue >= 0:
         mlength = length - minValue
-    
+
     result = []
-    
+
     for i in range(0, length, 2):
-        c1 = ord(nStr[i])
+        c1 = nStr[i]
         if i + 1 < length:
-            c2 = ord(nStr[i + 1])
+            c2 = nStr[i + 1]
         else:
             c2 = 0x30
         c1 = (c1 - 0x30) % 10
         c2 = (c2 - 0x30) % 10
-        
+
         result.append(UInt8((c1 << 4) | c2))
-    
+
     return (writeLength(mlength), tuple(result))
 
 def readPadding(s, length):
@@ -264,7 +264,7 @@ def writePadding(length):
     @param length: length of padding
     @return: String with \x00 * length
     """
-    return String("\x00"*length)
+    return String(b"\x00"*length)
 
 def readOctetStream(s, octetStream, minValue = 0):
     """
@@ -280,9 +280,10 @@ def readOctetStream(s, octetStream, minValue = 0):
     for i in range(0, size):
         c = UInt8()
         s.readType(c)
-        if ord(octetStream[i]) != c.value:
+        #if ord(octetStream[i]) != c.value:
+        if octetStream[i] != c.value:
             return False
-        
+
     return True
 
 def writeOctetStream(oStr, minValue = 0):
@@ -294,12 +295,13 @@ def writeOctetStream(oStr, minValue = 0):
     """
     length = len(oStr)
     mlength = minValue
-    
+
     if length - minValue >= 0:
         mlength = length - minValue
-    
+
     result = []
     for i in range(0, length):
-        result.append(UInt8(ord(oStr[i])))
-    
+        #result.append(UInt8(ord(oStr[i])))
+        result.append(UInt8(oStr[i]))
+
     return (writeLength(mlength), tuple(result))

@@ -30,14 +30,26 @@ def newkeys(size):
     """
     return rsa.newkeys(size)
 
+def int2bytes(i, fill_size=None):
+    """
+    @summary: wrapper of rsa.transform.int2bytes
+    """
+    return rsa.transform.int2bytes(i,fill_size)
+
+def bytes2int(b):
+    """
+    @summary: wrapper of rsa.transform.bytes2int
+    """
+    return rsa.transform.bytes2int(b)
+
 def PublicKey(e, n):
     """
     @param e: {long | str}public exponent
     @param n: {long | str}modulus
     """
-    if isinstance(e, str):
+    if isinstance(e, bytes):
         e = rsa.transform.bytes2int(e)
-    if isinstance(n, str):
+    if isinstance(n, bytes):
         n = rsa.transform.bytes2int(n)
     return { 'e' : e, 'n' : n }
 
@@ -46,17 +58,11 @@ def PrivateKey(d, n):
     @param d: {long | str}private exponent
     @param n: {long | str}modulus
     """
-    if isinstance(d, str):
+    if isinstance(d, bytes):
         d = rsa.transform.bytes2int(d)
-    if isinstance(n, str):
+    if isinstance(n, bytes):
         n = rsa.transform.bytes2int(n)
     return { 'd' : d, 'n' : n }
-
-def int2bytes(i, fill_size=None):
-    """
-    @summary: wrapper of rsa.transform.int2bytes
-    """
-    return rsa.transform.int2bytes(i,fill_size)
 
 def random(size):
     """
@@ -86,14 +92,15 @@ def sign(message, privateKey):
     """
     @summary: sign message with private key
     @param message: {str} message to sign
-    @param privateKey : {rsa.privateKey} key use to sugn
+    @param privateKey : {rsa.privateKey} key use to sign
     """
     return rsa.transform.int2bytes(rsa.core.encrypt_int(rsa.transform.bytes2int(message), privateKey['d'], privateKey['n']), rsa.common.byte_size(privateKey['n']))
+
 
 def verify(message, publicKey):
     """
     @summary: return hash
     @param message: {str} message to verify
-    @param publicKey : {rsa.publicKey} key use to sugn
+    @param publicKey : {rsa.publicKey} key use to verify
     """
     return rsa.transform.int2bytes(rsa.core.decrypt_int(rsa.transform.bytes2int(message), publicKey['e'], publicKey['n']))

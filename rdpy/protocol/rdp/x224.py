@@ -55,8 +55,9 @@ class Protocols(object):
     PROTOCOL_RDP = 0x00000000
     PROTOCOL_SSL = 0x00000001
     PROTOCOL_HYBRID = 0x00000002
+    PROTOCOL_RDSTLS = 0x00000004
     PROTOCOL_HYBRID_EX = 0x00000008
-        
+
 class NegotiationFailureCode(object):
     """
     @summary: Protocol negotiation failure code
@@ -67,7 +68,7 @@ class NegotiationFailureCode(object):
     INCONSISTENT_FLAGS = 0x00000004
     HYBRID_REQUIRED_BY_SERVER = 0x00000005
     SSL_WITH_USER_AUTH_REQUIRED_BY_SERVER = 0x00000006
-    
+
 class ClientConnectionRequestPDU(CompositeType):
     """
     @summary:  Connection request
@@ -79,7 +80,7 @@ class ClientConnectionRequestPDU(CompositeType):
         self.len = UInt8(lambda:sizeof(self) - 1)
         self.code = UInt8(MessageType.X224_TPDU_CONNECTION_REQUEST, constant = True)
         self.padding = (UInt16Be(), UInt16Be(), UInt8())
-        self.cookie = String(until = "\x0d\x0a", conditional = lambda:(self.len._is_readed and self.len.value > 14))
+        self.cookie = String(until = b"\x0d\x0a", conditional = lambda:(self.len._is_readed and self.len.value > 14))
         #read if there is enough data
         self.protocolNeg = Negotiation(optional = True)
 
@@ -95,7 +96,7 @@ class ServerConnectionConfirm(CompositeType):
         self.padding = (UInt16Be(), UInt16Be(), UInt8())
         #read if there is enough data
         self.protocolNeg = Negotiation(optional = True)
-        
+
 class X224DataHeader(CompositeType):
     """
     @summary: Header send when x224 exchange application data
@@ -105,7 +106,7 @@ class X224DataHeader(CompositeType):
         self.header = UInt8(2)
         self.messageType = UInt8(MessageType.X224_TPDU_DATA, constant = True)
         self.separator = UInt8(0x80, constant = True)
-    
+
 class Negotiation(CompositeType):
     """
     @summary: Negociate request message
@@ -133,10 +134,10 @@ class X224Layer(LayerAutomata, IStreamSender):
         """
         LayerAutomata.__init__(self, presentation)
         #client requested selectedProtocol
-        self._requestedProtocol = Protocols.PROTOCOL_SSL | Protocols.PROTOCOL_HYBRID
+        self._requestedProtocol = Protocols.PROTOCOL_SSL | Protocols.PROTOCOL_HYBRID | Protocols.PROTOCOL_RDP
         #server selected selectedProtocol
-        self._selectedProtocol = Protocols.PROTOCOL_SSL
-    
+        self._selectedProtocol = Protocols.PROTOCOL_RDP
+
     def recvData(self, data):
         """
         @summary: Read data header from packet
@@ -146,7 +147,7 @@ class X224Layer(LayerAutomata, IStreamSender):
         header = X224DataHeader()
         data.readType(header)
         self._presentation.recv(data)
-        
+
     def send(self, message):
         """
         @summary: Write message packet for TPDU layer
@@ -154,7 +155,7 @@ class X224Layer(LayerAutomata, IStreamSender):
         @param message: network.Type message
         """
         self._transport.send((X224DataHeader(), message))
-        
+
 class Client(X224Layer):
     """
     @summary: Client automata of TPDU layer
@@ -164,13 +165,13 @@ class Client(X224Layer):
         @param presentation: upper layer, MCS layer in RDP case
         """
         X224Layer.__init__(self, presentation)
-        
+
     def connect(self):
         """
         @summary: Connection request for client send a connection request packet
         """
         self.sendConnectionRequest()
-        
+
     def sendConnectionRequest(self):
         """
         @summary:  Write connection request message
@@ -182,11 +183,11 @@ class Client(X224Layer):
         message.protocolNeg.selectedProtocol.value = self._requestedProtocol
         self._transport.send(message)
         self.setNextState(self.recvConnectionConfirm)
-        
+
     def recvConnectionConfirm(self, data):
         """
         @summary:  Receive connection confirm message
-                    Next state is recvData 
+                    Next state is recvData
                     Call connect on presentation layer if all is good
         @param data: Stream that contain connection confirm
         @see: response -> http://msdn.microsoft.com/en-us/library/cc240506.aspx
@@ -194,42 +195,36 @@ class Client(X224Layer):
         """
         message = ServerConnectionConfirm()
         data.readType(message)
-        
+
         if message.protocolNeg.failureCode._is_readed:
             raise RDPSecurityNegoFail("negotiation failure code %x"%message.protocolNeg.failureCode.value)
-        
+
         #check presence of negotiation response
         if message.protocolNeg._is_readed:
             self._selectedProtocol = message.protocolNeg.selectedProtocol.value
         else:
             self._selectedProtocol = Protocols.PROTOCOL_RDP
-        
+
         #NLA protocol doesn't support in actual version of RDPY
         if self._selectedProtocol in [ Protocols.PROTOCOL_HYBRID_EX ]:
             raise InvalidExpectedDataException("RDPY doesn't support PROTOCOL_HYBRID_EX security Layer")
-        
+
         #now i'm ready to receive data
         self.setNextState(self.recvData)
-        
+
         if self._selectedProtocol ==  Protocols.PROTOCOL_RDP:
-            log.warning("*" * 43)
-            log.warning("*" + " " * 10  + "RDP Security selected" + " " * 10 + "*")
-            log.warning("*" * 43)
+            log.info("RDP Security selected")
             #connection is done send to presentation
             self._presentation.connect()
-            
+
         elif self._selectedProtocol ==  Protocols.PROTOCOL_SSL:
-            log.info("*" * 43)
-            log.info("*" + " " * 10  + "SSL Security selected" + " " * 10 + "*")
-            log.info("*" * 43)
+            log.info("SSL Security selected")
             self._transport.startTLS(ClientTLSContext())
             #connection is done send to presentation
             self._presentation.connect()
-    
+
         elif self._selectedProtocol == Protocols.PROTOCOL_HYBRID:
-            log.info("*" * 43)
-            log.info("*" + " " * 10  + "NLA Security selected" + " " * 10 + "*")
-            log.info("*" * 43)
+            log.info("NLA Security selected")
             self._transport.startNLA(ClientTLSContext(), lambda:self._presentation.connect())
 
 class Server(X224Layer):
@@ -248,13 +243,13 @@ class Server(X224Layer):
         self._serverPrivateKeyFileName = privateKeyFileName
         self._serverCertificateFileName = certificateFileName
         self._forceSSL = forceSSL and not self._serverPrivateKeyFileName is None and not self._serverCertificateFileName is None
-        
+
     def connect(self):
         """
         @summary: Connection request for server wait connection request packet from client
         """
         self.setNextState(self.recvConnectionRequest)
-        
+
     def recvConnectionRequest(self, data):
         """
         @summary:  Read connection confirm packet
@@ -264,18 +259,18 @@ class Server(X224Layer):
         """
         message = ClientConnectionRequestPDU()
         data.readType(message)
-        
+
         if not message.protocolNeg._is_readed:
             self._requestedProtocol = Protocols.PROTOCOL_RDP
         else:
             self._requestedProtocol = message.protocolNeg.selectedProtocol.value
-        
+
         #match best security layer available
         if not self._serverPrivateKeyFileName is None and not self._serverCertificateFileName is None:
             self._selectedProtocol = self._requestedProtocol & Protocols.PROTOCOL_SSL
         else:
             self._selectedProtocol = self._requestedProtocol & Protocols.PROTOCOL_RDP
-        
+
         #if force ssl is enable
         if not self._selectedProtocol & Protocols.PROTOCOL_SSL and self._forceSSL:
             log.warning("server reject client because doesn't support SSL")
@@ -286,9 +281,9 @@ class Server(X224Layer):
             self._transport.send(message)
             self.close()
             return
-        
+
         self.sendConnectionConfirm()
-        
+
     def sendConnectionConfirm(self):
         """
         @summary:  Write connection confirm message
@@ -304,7 +299,7 @@ class Server(X224Layer):
             log.debug("*" * 10 + " select SSL layer " + "*" * 10)
             #_transport is TPKT and transport is TCP layer of twisted
             self._transport.startTLS(ServerTLSContext(self._serverPrivateKeyFileName, self._serverCertificateFileName))
-            
+
         #connection is done send to presentation
         self.setNextState(self.recvData)
         self._presentation.connect()
@@ -322,7 +317,7 @@ class ClientTLSContext(ssl.ClientContextFactory):
         context.set_options(SSL.OP_DONT_INSERT_EMPTY_FRAGMENTS)
         context.set_options(SSL.OP_TLS_BLOCK_PADDING_BUG)
         return context
-    
+
 class ServerTLSContext(ssl.DefaultOpenSSLContextFactory):
     """
     @summary: Server context factory for open ssl
@@ -337,4 +332,3 @@ class ServerTLSContext(ssl.DefaultOpenSSLContextFactory):
                 self.set_options(SSL.OP_TLS_BLOCK_PADDING_BUG)
 
         ssl.DefaultOpenSSLContextFactory.__init__(self, privateKeyFileName, certificateFileName, SSL.SSLv23_METHOD, TPDUSSLContext)
-        

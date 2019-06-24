@@ -25,7 +25,7 @@ Use in PDU layer
 """
 
 from rdpy.core.type import CompositeType, CallableValue, String, UInt8, UInt16Le, UInt32Le, sizeof, ArrayType, FactoryType
-    
+
 class CapsType(object):
     """
     @summary: Different type of capabilities
@@ -59,7 +59,7 @@ class CapsType(object):
     CAPSETTYPE_SURFACE_COMMANDS = 0x001C
     CAPSETTYPE_BITMAP_CODECS = 0x001D
     CAPSSETTYPE_FRAME_ACKNOWLEDGE = 0x001E
-    
+
 class MajorType(object):
     """
     @summary: Use in general capability
@@ -73,7 +73,7 @@ class MajorType(object):
     OSMAJORTYPE_IOS = 0x0005
     OSMAJORTYPE_OSX = 0x0006
     OSMAJORTYPE_ANDROID = 0x0007
-        
+
 class MinorType(object):
     """
     @summary: Use in general capability
@@ -89,7 +89,7 @@ class MinorType(object):
     OSMINORTYPE_NATIVE_XSERVER = 0x0007
     OSMINORTYPE_PSEUDO_XSERVER = 0x0008
     OSMINORTYPE_WINDOWS_RT = 0x0009
- 
+
 class GeneralExtraFlag(object):
     """
     @summary: Use in general capability
@@ -100,11 +100,11 @@ class GeneralExtraFlag(object):
     LONG_CREDENTIALS_SUPPORTED = 0x0004
     AUTORECONNECT_SUPPORTED = 0x0008
     ENC_SALTED_CHECKSUM = 0x0010
-      
+
 class Boolean(object):
     FALSE = 0x00
     TRUE = 0x01
- 
+
 class OrderFlag(object):
     """
     @summary: Use in order capability
@@ -115,7 +115,7 @@ class OrderFlag(object):
     COLORINDEXSUPPORT = 0x0020
     SOLIDPATTERNBRUSHONLY = 0x0040
     ORDERFLAGS_EXTRA_FLAGS = 0x0080
-     
+
 class Order(object):
     """
     @summary: Drawing orders supported
@@ -143,7 +143,7 @@ class Order(object):
     TS_NEG_ELLIPSE_SC_INDEX = 0x19
     TS_NEG_ELLIPSE_CB_INDEX = 0x1A
     TS_NEG_INDEX_INDEX = 0x1B
-        
+
 class OrderEx(object):
     """
     @summary: Extension orders
@@ -184,7 +184,7 @@ class GlyphSupport(object):
     GLYPH_SUPPORT_PARTIAL = 0x0001
     GLYPH_SUPPORT_FULL = 0x0002
     GLYPH_SUPPORT_ENCODE = 0x0003
-   
+
 class OffscreenSupportLevel(object):
     """
     @summary: Use to determine offscreen cache level supported
@@ -192,7 +192,7 @@ class OffscreenSupportLevel(object):
     """
     FALSE = 0x00000000
     TRUE = 0x00000001
- 
+
 class VirtualChannelCompressionFlag(object):
     """
     @summary: Use to determine virtual channel compression
@@ -201,7 +201,7 @@ class VirtualChannelCompressionFlag(object):
     VCCAPS_NO_COMPR = 0x00000000
     VCCAPS_COMPR_SC = 0x00000001
     VCCAPS_COMPR_CS_8K = 0x00000002
-  
+
 class SoundFlag(object):
     """
     @summary: Use in sound capability to inform it
@@ -219,8 +219,8 @@ class CacheEntry(CompositeType):
         CompositeType.__init__(self)
         self.cacheEntries = UInt16Le()
         self.cacheMaximumCellSize = UInt16Le()
-    
-    
+
+
 class Capability(CompositeType):
     """
     @summary: A capability
@@ -230,7 +230,7 @@ class Capability(CompositeType):
         CompositeType.__init__(self)
         self.capabilitySetType = UInt16Le(lambda:capability.__class__._TYPE_)
         self.lengthCapability = UInt16Le(lambda:sizeof(self))
-        
+
         def CapabilityFactory():
             """
             Closure for capability factory
@@ -241,12 +241,12 @@ class Capability(CompositeType):
             log.debug("unknown Capability type : %s"%hex(self.capabilitySetType.value))
             #read entire packet
             return String(readLen = self.lengthCapability - 4)
-        
+
         if capability is None:
             capability = FactoryType(CapabilityFactory)
         elif not "_TYPE_" in capability.__class__.__dict__:
             raise InvalidExpectedDataException("Try to send an invalid capability block")
-            
+
         self.capability = capability
 
 class GeneralCapability(CompositeType):
@@ -257,7 +257,7 @@ class GeneralCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240549.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_GENERAL
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.osMajorType = UInt16Le()
@@ -271,7 +271,7 @@ class GeneralCapability(CompositeType):
         self.generalCompressionLevel = UInt16Le(0, constant = True)
         self.refreshRectSupport = UInt8()
         self.suppressOutputSupport = UInt8()
-        
+
 class BitmapCapability(CompositeType):
     """
     @summary: Bitmap format Capability
@@ -280,7 +280,7 @@ class BitmapCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240554.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_BITMAP
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.preferredBitsPerPixel = UInt16Le()
@@ -296,7 +296,7 @@ class BitmapCapability(CompositeType):
         self.drawingFlags = UInt8()
         self.multipleRectangleSupport = UInt16Le(0x0001, constant = True)
         self.pad2octetsB = UInt16Le()
-        
+
 class OrderCapability(CompositeType):
     """
     @summary: Order capability list all drawing order supported
@@ -305,10 +305,10 @@ class OrderCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240556.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_ORDER
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
-        self.terminalDescriptor = String("\x00" * 16, readLen = CallableValue(16))
+        self.terminalDescriptor = String(b"\x00" * 16, readLen = CallableValue(16))
         self.pad4octetsA = UInt32Le(0)
         self.desktopSaveXGranularity = UInt16Le(1)
         self.desktopSaveYGranularity = UInt16Le(20)
@@ -325,7 +325,7 @@ class OrderCapability(CompositeType):
         self.pad2octetsD = UInt16Le()
         self.textANSICodePage = UInt16Le(0)
         self.pad2octetsE = UInt16Le()
-        
+
 class BitmapCacheCapability(CompositeType):
     """
     @summary: Order use to cache bitmap very useful
@@ -333,7 +333,7 @@ class BitmapCacheCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240559.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_BITMAPCACHE
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.pad1 = UInt32Le()
@@ -348,7 +348,7 @@ class BitmapCacheCapability(CompositeType):
         self.cache1MaximumCellSize = UInt16Le()
         self.cache2Entries = UInt16Le()
         self.cache2MaximumCellSize = UInt16Le()
-        
+
 class PointerCapability(CompositeType):
     """
     @summary: Use to indicate pointer handle of client
@@ -358,14 +358,14 @@ class PointerCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240562.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_POINTER
-    
+
     def __init__(self, isServer = False, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.colorPointerFlag = UInt16Le()
         self.colorPointerCacheSize = UInt16Le(20)
         #old version of rdp doesn't support ...
         self.pointerCacheSize = UInt16Le(conditional = lambda:isServer)
-        
+
 class InputCapability(CompositeType):
     """
     @summary: Use to indicate input capabilities
@@ -374,7 +374,7 @@ class InputCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240563.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_INPUT
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.inputFlags = UInt16Le()
@@ -389,7 +389,7 @@ class InputCapability(CompositeType):
         self.keyboardFunctionKey = UInt32Le()
         #same value as gcc.ClientCoreSettingrrs.imeFileName
         self.imeFileName = String("\x00" * 64, readLen = CallableValue(64))
-        
+
 class BrushCapability(CompositeType):
     """
     @summary: Use to indicate brush capability
@@ -397,11 +397,11 @@ class BrushCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240564.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_BRUSH
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.brushSupportLevel = UInt32Le(BrushSupport.BRUSH_DEFAULT)
-        
+
 class GlyphCapability(CompositeType):
     """
     @summary: Use in font order
@@ -409,7 +409,7 @@ class GlyphCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240565.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_GLYPHCACHE
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.glyphCache = ArrayType(CacheEntry, init = [CacheEntry() for _ in range(0,10)], readLen = CallableValue(10))
@@ -417,7 +417,7 @@ class GlyphCapability(CompositeType):
         #all fonts are sent with bitmap format (very expensive)
         self.glyphSupportLevel = UInt16Le(GlyphSupport.GLYPH_SUPPORT_NONE)
         self.pad2octets = UInt16Le()
-        
+
 class OffscreenBitmapCacheCapability(CompositeType):
     """
     @summary: use to cached bitmap in offscreen area
@@ -425,13 +425,13 @@ class OffscreenBitmapCacheCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240550.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_OFFSCREENCACHE
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.offscreenSupportLevel = UInt32Le(OffscreenSupportLevel.FALSE)
         self.offscreenCacheSize = UInt16Le()
         self.offscreenCacheEntries = UInt16Le()
-        
+
 class VirtualChannelCapability(CompositeType):
     """
     @summary: use to determine virtual channel compression
@@ -440,12 +440,12 @@ class VirtualChannelCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240551.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_VIRTUALCHANNEL
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.flags = UInt32Le(VirtualChannelCompressionFlag.VCCAPS_NO_COMPR)
         self.VCChunkSize = UInt32Le(optional = True)
-        
+
 class SoundCapability(CompositeType):
     """
     @summary: Use to exchange sound capability
@@ -453,40 +453,40 @@ class SoundCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240552.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_SOUND
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.soundFlags = UInt16Le(SoundFlag.NONE)
         self.pad2octetsA = UInt16Le()
-        
+
 class ControlCapability(CompositeType):
     """
     @summary: client -> server but server ignore contents! Thanks krosoft for brandwidth
     @see: http://msdn.microsoft.com/en-us/library/cc240568.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_CONTROL
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.controlFlags = UInt16Le()
         self.remoteDetachFlag = UInt16Le()
         self.controlInterest = UInt16Le(0x0002)
         self.detachInterest = UInt16Le(0x0002)
-    
+
 class WindowActivationCapability(CompositeType):
     """
     @summary: client -> server but server ignore contents! Thanks krosoft for brandwidth
     @see: http://msdn.microsoft.com/en-us/library/cc240569.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_ACTIVATION
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.helpKeyFlag = UInt16Le()
         self.helpKeyIndexFlag = UInt16Le()
         self.helpExtendedKeyFlag = UInt16Le()
         self.windowManagerKeyFlag = UInt16Le()
-        
+
 class FontCapability(CompositeType):
     """
     @summary: Use to indicate font support
@@ -495,12 +495,12 @@ class FontCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240571.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_FONT
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.fontSupportFlags = UInt16Le(0x0001)
         self.pad2octets = UInt16Le()
-        
+
 class ColorCacheCapability(CompositeType):
     """
     client -> server
@@ -508,12 +508,12 @@ class ColorCacheCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc241564.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_COLORCACHE
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.colorTableCacheSize = UInt16Le(0x0006)
         self.pad2octets = UInt16Le()
-        
+
 class ShareCapability(CompositeType):
     """
     @summary: Use to advertise channel id of server
@@ -522,12 +522,12 @@ class ShareCapability(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240570.aspx
     """
     _TYPE_ = CapsType.CAPSTYPE_SHARE
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.nodeId = UInt16Le()
         self.pad2octets = UInt16Le()
-        
+
 class MultiFragmentUpdate(CompositeType):
     """
     @summary: Use to advertise fast path max buffer to use
@@ -536,7 +536,7 @@ class MultiFragmentUpdate(CompositeType):
     @see: http://msdn.microsoft.com/en-us/library/cc240649.aspx
     """
     _TYPE_ = CapsType.CAPSETTYPE_MULTIFRAGMENTUPDATE
-    
+
     def __init__(self, readLen = None):
         CompositeType.__init__(self, readLen = readLen)
         self.MaxRequestSize = UInt32Le(0)

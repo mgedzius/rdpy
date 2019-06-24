@@ -49,12 +49,12 @@ _SCANCODE_QWERTY_ = {
     0x31 : "n",
     0x32 : "m"
 }
-        
+
 def scancodeToChar(code):
     """
     @summary: try to convert native code to char code
     @return: char
     """
-    if not _SCANCODE_QWERTY_.has_key(code):
-        return "<unknown scancode %x>"%code
+    if code not in _SCANCODE_QWERTY_:
+        return "<unknown scancode {:x}>".format(code)
     return _SCANCODE_QWERTY_[code];

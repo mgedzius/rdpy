@@ -24,7 +24,7 @@ Use to build correct size packet and handle slow path and fast path mode
 """
 from rdpy.core.layer import RawLayer
 from rdpy.core.type import UInt8, UInt16Be, sizeof
-from rdpy.core.error import CallPureVirtualFuntion
+from rdpy.core.error import CallPureVirtualFunction
 
 class Action(object):
     """
@@ -33,7 +33,7 @@ class Action(object):
     """
     FASTPATH_ACTION_FASTPATH = 0x0
     FASTPATH_ACTION_X224 = 0x3
-    
+
 class SecFlags(object):
     """
     @see: http://msdn.microsoft.com/en-us/library/cc240621.aspx
@@ -53,8 +53,8 @@ class IFastPathListener(object):
         @param secFlag: {SecFlags}
         @param fastPathS: {Stream}
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "recvFastPath", "IFastPathListener"))
-    
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "recvFastPath", "IFastPathListener"))
+
     def initFastPath(self, fastPathSender):
         """
         @summary: initialize stack
@@ -62,13 +62,13 @@ class IFastPathListener(object):
         """
         self.setFastPathSender(fastPathSender)
         fastPathSender.setFastPathListener(self)
-    
+
     def setFastPathSender(self, fastPathSender):
         """
         @param fastPathSender : {IFastPathSender}
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "setFastPathSender", "IFastPathListener"))
-    
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "setFastPathSender", "IFastPathListener"))
+
 class IFastPathSender(object):
     """
     @summary: Fast path send capability
@@ -79,8 +79,8 @@ class IFastPathSender(object):
         @param secFlag: {integer} Security flag for fastpath packet
         @param fastPathS: {Type | Tuple} type transform to stream and send as fastpath
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "sendFastPath", "IFastPathSender"))
-    
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "sendFastPath", "IFastPathSender"))
+
     def initFastPath(self, fastPathListener):
         """
         @summary: initialize stack
@@ -88,12 +88,12 @@ class IFastPathSender(object):
         """
         self.setFastPathListener(fastPathListener)
         fastPathListener.setFastPathSender(self)
-        
+
     def setFastPathListener(self, fastPathListener):
         """
         @param fastPathListener: {IFastPathListener}
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "setFastPathListener", "IFastPathSender"))
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "setFastPathListener", "IFastPathSender"))
 
 class TPKT(RawLayer, IFastPathSender):
     """
@@ -112,14 +112,14 @@ class TPKT(RawLayer, IFastPathSender):
         self._fastPathListener = None
         #last secure flag
         self._secFlag = 0
-            
+
     def setFastPathListener(self, fastPathListener):
         """
         @param fastPathListener : {IFastPathListener}
         @note: implement IFastPathSender
         """
         self._fastPathListener = fastPathListener
-        
+
     def connect(self):
         """
         @summary:  Call when transport layer connection
@@ -130,7 +130,7 @@ class TPKT(RawLayer, IFastPathSender):
         #no connection automata on this layer
         if not self._presentation is None:
             self._presentation.connect()
-        
+
     def readHeader(self, data):
         """
         @summary: Read header of TPKT packet
@@ -154,8 +154,8 @@ class TPKT(RawLayer, IFastPathSender):
                 self.expect(1, self.readExtendedFastPathHeader)
                 return
             self.expect(self._lastShortLength.value - 2, self.readFastPath)
-                
-        
+
+
     def readExtendedHeader(self, data):
         """
         @summary: Header may be on 4 bytes
@@ -165,7 +165,7 @@ class TPKT(RawLayer, IFastPathSender):
         size = UInt16Be()
         data.readType(size)
         self.expect(size.value - 4, self.readData)
-    
+
     def readExtendedFastPathHeader(self, data):
         """
         @summary: Fast path header may be on 1 byte more
@@ -177,7 +177,7 @@ class TPKT(RawLayer, IFastPathSender):
         packetSize = (self._lastShortLength.value << 8) + leftPart.value
         #next state is fast patn data
         self.expect(packetSize - 3, self.readFastPath)
-    
+
     def readFastPath(self, data):
         """
         @summary: Fast path data
@@ -185,37 +185,37 @@ class TPKT(RawLayer, IFastPathSender):
         """
         self._fastPathListener.recvFastPath(self._secFlag, data)
         self.expect(2, self.readHeader)
-    
+
     def readData(self, data):
         """
         @summary: Read classic TPKT packet, last state in tpkt automata
         @param data: {Stream} with correct size
         """
-        #next state is pass to 
+        #next state is pass to
         self._presentation.recv(data)
         self.expect(2, self.readHeader)
-        
+
     def send(self, message):
         """
         @summary: Send encompassed data
         @param message: {network.Type} message to send
         """
         RawLayer.send(self, (UInt8(Action.FASTPATH_ACTION_X224), UInt8(0), UInt16Be(sizeof(message) + 4), message))
-        
+
     def sendFastPath(self, secFlag, fastPathS):
         """
         @param fastPathS: {Type | Tuple} type transform to stream and send as fastpath
         @param secFlag: {integer} Security flag for fastpath packet
         """
         RawLayer.send(self, (UInt8(Action.FASTPATH_ACTION_FASTPATH | ((secFlag & 0x3) << 6)), UInt16Be((sizeof(fastPathS) + 3) | 0x8000), fastPathS))
-    
+
     def startTLS(self, sslContext):
         """
         @summary: start TLS protocol
         @param sslContext: {ssl.ClientContextFactory | ssl.DefaultOpenSSLContextFactory} context use for TLS protocol
         """
         self.transport.startTLS(sslContext)
-       
+
     def startNLA(self, sslContext, callback):
         """
         @summary: use to start NLA (NTLM over SSL) protocol

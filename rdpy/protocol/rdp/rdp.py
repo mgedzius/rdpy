@@ -22,14 +22,16 @@ Use to manage RDP stack in twisted
 """
 
 from rdpy.core import layer
-from rdpy.core.error import CallPureVirtualFuntion, InvalidValue
-import pdu.layer
-import pdu.data
-import pdu.caps
+from rdpy.core.error import CallPureVirtualFunction, InvalidValue
+from .pdu import layer as PduLayer
+from .pdu import data as PduData
+from .pdu import caps as PduCaps
 import rdpy.core.log as log
-import tpkt, x224, sec
-from t125 import mcs, gcc
-from nla import cssp, ntlm
+from . import tpkt
+from . import x224
+from . import sec
+from .t125 import mcs, gcc
+from .nla import cssp, ntlm
 
 class SecurityLevel(object):
     """
@@ -39,19 +41,26 @@ class SecurityLevel(object):
     RDP_LEVEL_SSL = 1
     RDP_LEVEL_NLA = 2
 
-class RDPClientController(pdu.layer.PDUClientListener):
+class RDPClientController(PduLayer.PDUClientListener):
     """
     Manage RDP stack as client
     """
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         #list of observer
         self._clientObserver = []
         #PDU layer
-        self._pduLayer = pdu.layer.Client(self)
+        self._pduLayer = PduLayer.Client(self)
         #secure layer
         self._secLayer = sec.Client(self._pduLayer)
+        # Virtual Channels
+        self._virtual_channels = []
+        self._virtual_channel_classes = kwargs.setdefault("virtual_channels", [])
+        for channelClass in self._virtual_channel_classes:
+            vc = channelClass(self._secLayer)
+            self._virtual_channels.append( (vc._definition, vc) )
+
         #multi channel service
-        self._mcsLayer = mcs.Client(self._secLayer)
+        self._mcsLayer = mcs.Client(self._secLayer, self._virtual_channels)
         #transport pdu layer
         self._x224Layer = x224.Client(self._mcsLayer)
         #transport packet (protocol layer)
@@ -61,32 +70,32 @@ class RDPClientController(pdu.layer.PDUClientListener):
         self._secLayer.initFastPath(self._tpktLayer)
         #is pdu layer is ready to send
         self._isReady = False
-        
+
     def getProtocol(self):
         """
         @return: return Protocol layer for twisted
         In case of RDP TPKT is the Raw layer
         """
         return cssp.CSSP(self._tpktLayer, ntlm.NTLMv2(self._secLayer._info.domain.value, self._secLayer._info.userName.value, self._secLayer._info.password.value))
-    
+
     def getColorDepth(self):
         """
         @return: color depth set by the server (15, 16, 24)
         """
-        return self._pduLayer._serverCapabilities[pdu.caps.CapsType.CAPSTYPE_BITMAP].capability.preferredBitsPerPixel.value
-    
+        return self._pduLayer._serverCapabilities[PduCaps.CapsType.CAPSTYPE_BITMAP].capability.preferredBitsPerPixel.value
+
     def getKeyEventUniCodeSupport(self):
         """
         @return: True if server support unicode input
         """
-        return self._pduLayer._serverCapabilities[pdu.caps.CapsType.CAPSTYPE_INPUT].capability.inputFlags.value & pdu.caps.InputFlags.INPUT_FLAG_UNICODE
-        
+        return self._pduLayer._serverCapabilities[PduCaps.CapsType.CAPSTYPE_INPUT].capability.inputFlags.value & PduCaps.InputFlags.INPUT_FLAG_UNICODE
+
     def setPerformanceSession(self):
         """
         @summary: Set particular flag in RDP stack to avoid wall-paper, theme, menu animation etc...
         """
         self._secLayer._info.extendedInfo.performanceFlags.value = sec.PerfFlag.PERF_DISABLE_WALLPAPER | sec.PerfFlag.PERF_DISABLE_MENUANIMATIONS | sec.PerfFlag.PERF_DISABLE_CURSOR_SHADOW | sec.PerfFlag.PERF_DISABLE_THEMING | sec.PerfFlag.PERF_DISABLE_FULLWINDOWDRAG
-        
+
     def setScreen(self, width, height):
         """
         @summary: Set screen dim of session
@@ -96,44 +105,44 @@ class RDPClientController(pdu.layer.PDUClientListener):
         #set screen definition in MCS layer
         self._mcsLayer._clientSettings.getBlock(gcc.MessageType.CS_CORE).desktopHeight.value = height
         self._mcsLayer._clientSettings.getBlock(gcc.MessageType.CS_CORE).desktopWidth.value = width
-        
+
     def setUsername(self, username):
         """
         @summary: Set the username for session
         @param username: {string} username of session
         """
         #username in PDU info packet
-        self._secLayer._info.userName.value = username
+        self._secLayer._info.userName.value = username.encode("utf-8")
         self._secLayer._licenceManager._username = username
-        
+
     def setPassword(self, password):
         """
         @summary: Set password for session
         @param password: {string} password of session
         """
         self.setAutologon()
-        self._secLayer._info.password.value = password
-        
+        self._secLayer._info.password.value = password.encode("utf-8")
+
     def setDomain(self, domain):
         """
         @summary: Set the windows domain of session
         @param domain: {string} domain of session
         """
-        self._secLayer._info.domain.value = domain
-        
+        self._secLayer._info.domain.value = domain.encode("utf-8")
+
     def setAutologon(self):
         """
         @summary: enable autologon
         """
         self._secLayer._info.flag |= sec.InfoFlag.INFO_AUTOLOGON
-        
+
     def setAlternateShell(self, appName):
         """
         @summary: set application name of app which start at the begining of session
         @param appName: {string} application name
         """
-        self._secLayer._info.alternateShell.value = appName
-        
+        self._secLayer._info.alternateShell.value = appName.encode("utf-8")
+
     def setKeyboardLayout(self, layout):
         """
         @summary: keyboard layout
@@ -143,14 +152,16 @@ class RDPClientController(pdu.layer.PDUClientListener):
             self._mcsLayer._clientSettings.CS_CORE.kbdLayout.value = gcc.KeyboardLayout.FRENCH
         elif layout == "us":
             self._mcsLayer._clientSettings.CS_CORE.kbdLayout.value = gcc.KeyboardLayout.US
-    
+
     def setHostname(self, hostname):
         """
         @summary: set hostname of machine
         """
-        self._mcsLayer._clientSettings.CS_CORE.clientName.value = hostname[:15] + "\x00" * (15 - len(hostname))
+        _hostname = hostname.encode("utf-8")
+        _hostname = _hostname[:15].ljust(15, b"\x00")
+        self._mcsLayer._clientSettings.CS_CORE.clientName.value = _hostname
         self._secLayer._licenceManager._hostname = hostname
-        
+
     def setSecurityLevel(self, level):
         """
         @summary: Request basic security
@@ -162,14 +173,16 @@ class RDPClientController(pdu.layer.PDUClientListener):
             self._x224Layer._requestedProtocol = x224.Protocols.PROTOCOL_SSL
         elif level == SecurityLevel.RDP_LEVEL_NLA:
             self._x224Layer._requestedProtocol = x224.Protocols.PROTOCOL_SSL | x224.Protocols.PROTOCOL_HYBRID
-        
+        else:
+            raise ValueError("Unsupported security level {}".format(level))
+
     def addClientObserver(self, observer):
         """
         @summary: Add observer to RDP protocol
         @param observer: new observer to add
         """
         self._clientObserver.append(observer)
-        
+
     def removeClientObserver(self, observer):
         """
         @summary: Remove observer to RDP protocol stack
@@ -179,7 +192,7 @@ class RDPClientController(pdu.layer.PDUClientListener):
             if self._clientObserver[i] == observer:
                 del self._clientObserver[i]
                 return
-        
+
     def onUpdate(self, rectangles):
         """
         @summary: Call when a bitmap data is received from update PDU
@@ -188,8 +201,8 @@ class RDPClientController(pdu.layer.PDUClientListener):
         for observer in self._clientObserver:
             #for each rectangle in update PDU
             for rectangle in rectangles:
-                observer.onUpdate(rectangle.destLeft.value, rectangle.destTop.value, rectangle.destRight.value, rectangle.destBottom.value, rectangle.width.value, rectangle.height.value, rectangle.bitsPerPixel.value, rectangle.flags.value & pdu.data.BitmapFlag.BITMAP_COMPRESSION, rectangle.bitmapDataStream.value)
-                
+                observer.onUpdate(rectangle.destLeft.value, rectangle.destTop.value, rectangle.destRight.value, rectangle.destBottom.value, rectangle.width.value, rectangle.height.value, rectangle.bitsPerPixel.value, rectangle.flags.value & PduData.BitmapFlag.BITMAP_COMPRESSION, rectangle.bitmapDataStream.value)
+
     def onReady(self):
         """
         @summary: Call when PDU layer is connected
@@ -198,7 +211,7 @@ class RDPClientController(pdu.layer.PDUClientListener):
         #signal all listener
         for observer in self._clientObserver:
             observer.onReady()
-            
+
     def onSessionReady(self):
         """
         @summary: Call when Windows session is ready (connected)
@@ -207,7 +220,7 @@ class RDPClientController(pdu.layer.PDUClientListener):
         #signal all listener
         for observer in self._clientObserver:
             observer.onSessionReady()
-            
+
     def onClose(self):
         """
         @summary: Event call when RDP stack is closed
@@ -215,7 +228,7 @@ class RDPClientController(pdu.layer.PDUClientListener):
         self._isReady = False
         for observer in self._clientObserver:
             observer.onClose()
-    
+
     def sendPointerEvent(self, x, y, button, isPressed):
         """
         @summary: send pointer events
@@ -229,39 +242,39 @@ class RDPClientController(pdu.layer.PDUClientListener):
 
         try:
             if button == 4 or button == 5:
-                event = pdu.data.PointerExEvent()
+                event = PduData.PointerExEvent()
                 if isPressed:
-                    event.pointerFlags.value |= pdu.data.PointerExFlag.PTRXFLAGS_DOWN
+                    event.pointerFlags.value |= PduData.PointerExFlag.PTRXFLAGS_DOWN
 
                 if button == 4:
-                    event.pointerFlags.value |= pdu.data.PointerExFlag.PTRXFLAGS_BUTTON1
+                    event.pointerFlags.value |= PduData.PointerExFlag.PTRXFLAGS_BUTTON1
                 elif button == 5:
-                    event.pointerFlags.value |= pdu.data.PointerExFlag.PTRXFLAGS_BUTTON2
+                    event.pointerFlags.value |= PduData.PointerExFlag.PTRXFLAGS_BUTTON2
 
             else:
-                event = pdu.data.PointerEvent()
+                event = PduData.PointerEvent()
                 if isPressed:
-                    event.pointerFlags.value |= pdu.data.PointerFlag.PTRFLAGS_DOWN
-                
+                    event.pointerFlags.value |= PduData.PointerFlag.PTRFLAGS_DOWN
+
                 if button == 1:
-                    event.pointerFlags.value |= pdu.data.PointerFlag.PTRFLAGS_BUTTON1
+                    event.pointerFlags.value |= PduData.PointerFlag.PTRFLAGS_BUTTON1
                 elif button == 2:
-                    event.pointerFlags.value |= pdu.data.PointerFlag.PTRFLAGS_BUTTON2
+                    event.pointerFlags.value |= PduData.PointerFlag.PTRFLAGS_BUTTON2
                 elif button == 3:
-                    event.pointerFlags.value |= pdu.data.PointerFlag.PTRFLAGS_BUTTON3
+                    event.pointerFlags.value |= PduData.PointerFlag.PTRFLAGS_BUTTON3
                 else:
-                    event.pointerFlags.value |= pdu.data.PointerFlag.PTRFLAGS_MOVE
-            
+                    event.pointerFlags.value |= PduData.PointerFlag.PTRFLAGS_MOVE
+
             # position
             event.xPos.value = x
             event.yPos.value = y
-            
+
             # send proper event
             self._pduLayer.sendInputEvents([event])
-            
+
         except InvalidValue:
-            log.info("try send pointer event with incorrect position")
-    
+            log.warning("try send pointer event with incorrect position")
+
     def sendWheelEvent(self, x, y, step, isNegative = False, isHorizontal = False):
         """
         @summary: Send a mouse wheel event
@@ -275,28 +288,28 @@ class RDPClientController(pdu.layer.PDUClientListener):
             return
 
         try:
-            event = pdu.data.PointerEvent()
+            event = PduData.PointerEvent()
             if isHorizontal:
-                event.pointerFlags.value |= pdu.data.PointerFlag.PTRFLAGS_HWHEEL
+                event.pointerFlags.value |= PduData.PointerFlag.PTRFLAGS_HWHEEL
             else:
-                event.pointerFlags.value |= pdu.data.PointerFlag.PTRFLAGS_WHEEL
-                
+                event.pointerFlags.value |= PduData.PointerFlag.PTRFLAGS_WHEEL
+
             if isNegative:
-                event.pointerFlags.value |= pdu.data.PointerFlag.PTRFLAGS_WHEEL_NEGATIVE
-                
-            event.pointerFlags.value |= (step & pdu.data.PointerFlag.WheelRotationMask)
-            
+                event.pointerFlags.value |= PduData.PointerFlag.PTRFLAGS_WHEEL_NEGATIVE
+
+            event.pointerFlags.value |= (step & PduData.PointerFlag.WheelRotationMask)
+
             #position
             event.xPos.value = x
             event.yPos.value = y
-            
+
             #send proper event
             self._pduLayer.sendInputEvents([event])
-            
+
         except InvalidValue:
-            log.info("try send wheel event with incorrect position")
-            
-    def sendKeyEventScancode(self, code, isPressed, extended = False):
+            log.warning("try send wheel event with incorrect position")
+
+    def sendKeyEventsScancode(self, codes, isPressed, extended = False):
         """
         @summary: Send a scan code to RDP stack
         @param code: scan code
@@ -305,43 +318,67 @@ class RDPClientController(pdu.layer.PDUClientListener):
         """
         if not self._isReady:
             return
-        
+
+        events = []
         try:
-            event = pdu.data.ScancodeKeyEvent()
-            event.keyCode.value = code
-            if not isPressed:
-                event.keyboardFlags.value |= pdu.data.KeyboardFlag.KBDFLAGS_RELEASE
-            
-            if extended:
-                event.keyboardFlags.value |= pdu.data.KeyboardFlag.KBDFLAGS_EXTENDED
-                
+            for code in codes:
+                event = PduData.ScancodeKeyEvent()
+                event.keyCode.value = code
+                if not isPressed:
+                    event.keyboardFlags.value |= PduData.KeyboardFlag.KBDFLAGS_RELEASE
+
+                if extended:
+                    event.keyboardFlags.value |= PduData.KeyboardFlag.KBDFLAGS_EXTENDED
+                events.append(event)
+
             #send event
-            self._pduLayer.sendInputEvents([event])
-            
+            self._pduLayer.sendInputEvents(events)
+
         except InvalidValue:
-            log.info("try send bad key event")
-            
-    def sendKeyEventUnicode(self, code, isPressed):
+            log.warning("try send bad key event")
+
+    def sendKeyEventScancode(self, code, isPressed, extended = False):
         """
         @summary: Send a scan code to RDP stack
         @param code: unicode
         @param isPressed: True if key is pressed and false if it's released
         """
+        self.sendKeyEventsScancode([code,], isPressed, extended)
+
+
+    def sendKeyEventsUnicode(self, codes, isPressed):
+        """
+        @summary: Send multiple unicode characters
+        @param codes: an array of unicode char
+        @param isPressed: True if key is pressed and false if it's released
+        """
         if not self._isReady:
             return
-        
+
+        events = []
+
         try:
-            event = pdu.data.UnicodeKeyEvent()
-            event.unicode.value = code
-            if not isPressed:
-                event.keyboardFlags.value |= pdu.data.KeyboardFlag.KBDFLAGS_RELEASE
-            
+            for code in codes:
+                event = PduData.UnicodeKeyEvent()
+                event.unicode.value = code
+                if not isPressed:
+                    event.keyboardFlags.value |= PduData.KeyboardFlag.KBDFLAGS_RELEASE
+                events.append(event)
+
             #send event
-            self._pduLayer.sendInputEvents([event])
-            
+            self._pduLayer.sendInputEvents(events)
+
         except InvalidValue:
-            log.info("try send bad key event")
-            
+            log.warning("try send bad key event")
+
+    def sendKeyEventUnicode(self, code, isPressed):
+        """
+        @summary: Send a unicode code to RDP stack
+        @param code: unicode
+        @param isPressed: True if key is pressed and false if it's released
+        """
+        self.sendKeyEventsUnicode([code,], isPressed)
+
     def sendRefreshOrder(self, left, top, right, bottom):
         """
         @summary: Force server to resend a particular zone
@@ -350,25 +387,25 @@ class RDPClientController(pdu.layer.PDUClientListener):
         @param right: right coordinate
         @param bottom: bottom coordinate
         """
-        refreshPDU = pdu.data.RefreshRectPDU()
-        rect = pdu.data.InclusiveRectangle()
+        refreshPDU = PduData.RefreshRectPDU()
+        rect = PduData.InclusiveRectangle()
         rect.left.value = left
         rect.top.value = top
         rect.right.value = right
         rect.bottom.value = bottom
         refreshPDU.areasToRefresh._array.append(rect)
         self._pduLayer.sendDataPDU(refreshPDU)
-            
+
     def close(self):
         """
         @summary: Close protocol stack
         """
         self._pduLayer.close()
 
-class RDPServerController(pdu.layer.PDUServerListener):
+class RDPServerController(PduLayer.PDUServerListener):
     """
     @summary: Controller use in server side mode
-    """               
+    """
     def __init__(self, colorDepth, privateKeyFileName = None, certificateFileName = None):
         """
         @param privateKeyFileName: file contain server private key
@@ -379,7 +416,7 @@ class RDPServerController(pdu.layer.PDUServerListener):
         #list of observer
         self._serverObserver = []
         #build RDP protocol stack
-        self._pduLayer = pdu.layer.Server(self)
+        self._pduLayer = PduLayer.Server(self)
         #secure layer
         self._secLayer = sec.Server(self._pduLayer)
         #multi channel service
@@ -388,80 +425,80 @@ class RDPServerController(pdu.layer.PDUServerListener):
         self._x224Layer = x224.Server(self._mcsLayer, privateKeyFileName, certificateFileName, False)
         #transport packet (protocol layer)
         self._tpktLayer = tpkt.TPKT(self._x224Layer)
-        
+
         #fastpath stack
         self._pduLayer.initFastPath(self._secLayer)
         self._secLayer.initFastPath(self._tpktLayer)
         #set color depth of session
         self.setColorDepth(colorDepth)
-        
+
     def close(self):
         """
         @summary: Close protocol stack
         """
         self._pduLayer.close()
-        
+
     def getProtocol(self):
         """
         @return: the twisted protocol layer
         in RDP case is TPKT layer
         """
         return self._tpktLayer
-    
+
     def getHostname(self):
         """
         @return: name of client (information done by RDP)
         """
-        return self._mcsLayer._clientSettings.CS_CORE.clientName.value.strip('\x00')
-    
+        return self._mcsLayer._clientSettings.CS_CORE.clientName.value.strip(b'\x00')
+
     def getUsername(self):
         """
         @summary: Must be call after on ready event else always empty string
         @return: username send by client may be an empty string
         """
         return self._secLayer._info.userName.value
-    
+
     def getPassword(self):
         """
         @summary: Must be call after on ready event else always empty string
         @return: password send by client may be an empty string
         """
         return self._secLayer._info.password.value
-    
+
     def getDomain(self):
         """
         @summary: Must be call after on ready event else always empty string
         @return: domain send by client may be an empty string
         """
         return self._secLayer._info.domain.value
-    
+
     def getCredentials(self):
         """
         @summary: Must be call after on ready event else always empty string
         @return: tuple(domain, username, password)
         """
         return (self.getDomain(), self.getUsername(), self.getPassword())
-    
+
     def getColorDepth(self):
         """
         @return: color depth define by server
         """
         return self._colorDepth
-    
+
     def getScreen(self):
         """
         @return: tuple(width, height) of client asked screen
         """
-        bitmapCap = self._pduLayer._clientCapabilities[pdu.caps.CapsType.CAPSTYPE_BITMAP].capability
+        bitmapCap = self._pduLayer._clientCapabilities[PduCaps.CapsType.CAPSTYPE_BITMAP].capability
         return (bitmapCap.desktopWidth.value, bitmapCap.desktopHeight.value)
-    
+
     def addServerObserver(self, observer):
         """
         @summary: Add observer to RDP protocol
         @param observer: new observer to add
         """
         self._serverObserver.append(observer)
-        
+
     def setColorDepth(self, colorDepth):
         """
         @summary:  Set color depth of session
@@ -470,18 +507,18 @@ class RDPServerController(pdu.layer.PDUServerListener):
         @param colorDepth: {integer} depth of session (15, 16, 24)
         """
         self._colorDepth = colorDepth
-        self._pduLayer._serverCapabilities[pdu.caps.CapsType.CAPSTYPE_BITMAP].capability.preferredBitsPerPixel.value = colorDepth
+        self._pduLayer._serverCapabilities[PduCaps.CapsType.CAPSTYPE_BITMAP].capability.preferredBitsPerPixel.value = colorDepth
         if self._isReady:
             #restart connection sequence
             self._isReady = False
-            self._pduLayer.sendPDU(pdu.data.DeactiveAllPDU())
-            
+            self._pduLayer.sendPDU(PduData.DeactiveAllPDU())
+
     def setKeyEventUnicodeSupport(self):
         """
         @summary: Enable key event in unicode format
         """
-        self._pduLayer._serverCapabilities[pdu.caps.CapsType.CAPSTYPE_INPUT].capability.inputFlags.value |= pdu.caps.InputFlags.INPUT_FLAG_UNICODE
-    
+        self._pduLayer._serverCapabilities[PduCaps.CapsType.CAPSTYPE_INPUT].capability.inputFlags.value |= PduCaps.InputFlags.INPUT_FLAG_UNICODE
+
     def onReady(self):
         """
         @summary: RDP stack is now ready
@@ -489,7 +526,7 @@ class RDPServerController(pdu.layer.PDUServerListener):
         self._isReady = True
         for observer in self._serverObserver:
             observer.onReady()
-            
+
     def onClose(self):
         """
         @summary: Event call when RDP stack is closed
@@ -497,7 +534,7 @@ class RDPServerController(pdu.layer.PDUServerListener):
         self._isReady = False
         for observer in self._serverObserver:
             observer.onClose()
-            
+
     def onSlowPathInput(self, slowPathInputEvents):
         """
         @summary: Event call when slow path input are available
@@ -506,32 +543,32 @@ class RDPServerController(pdu.layer.PDUServerListener):
         for observer in self._serverObserver:
             for event in slowPathInputEvents:
                 #scan code
-                if event.messageType.value == pdu.data.InputMessageType.INPUT_EVENT_SCANCODE:
-                    observer.onKeyEventScancode(event.slowPathInputData.keyCode.value, not (event.slowPathInputData.keyboardFlags.value & pdu.data.KeyboardFlag.KBDFLAGS_RELEASE), bool(event.slowPathInputData.keyboardFlags.value & pdu.data.KeyboardFlag.KBDFLAGS_EXTENDED))
+                if event.messageType.value == PduData.InputMessageType.INPUT_EVENT_SCANCODE:
+                    observer.onKeyEventScancode(event.slowPathInputData.keyCode.value, not (event.slowPathInputData.keyboardFlags.value & PduData.KeyboardFlag.KBDFLAGS_RELEASE), bool(event.slowPathInputData.keyboardFlags.value & PduData.KeyboardFlag.KBDFLAGS_EXTENDED))
                 #unicode
-                elif event.messageType.value == pdu.data.InputMessageType.INPUT_EVENT_UNICODE:
-                    observer.onKeyEventUnicode(event.slowPathInputData.unicode.value, not (event.slowPathInputData.keyboardFlags.value & pdu.data.KeyboardFlag.KBDFLAGS_RELEASE))
+                elif event.messageType.value == PduData.InputMessageType.INPUT_EVENT_UNICODE:
+                    observer.onKeyEventUnicode(event.slowPathInputData.unicode.value, not (event.slowPathInputData.keyboardFlags.value & PduData.KeyboardFlag.KBDFLAGS_RELEASE))
                 #mouse events
-                elif event.messageType.value == pdu.data.InputMessageType.INPUT_EVENT_MOUSE:
-                    isPressed = event.slowPathInputData.pointerFlags.value & pdu.data.PointerFlag.PTRFLAGS_DOWN
+                elif event.messageType.value == PduData.InputMessageType.INPUT_EVENT_MOUSE:
+                    isPressed = event.slowPathInputData.pointerFlags.value & PduData.PointerFlag.PTRFLAGS_DOWN
                     button = 0
-                    if event.slowPathInputData.pointerFlags.value & pdu.data.PointerFlag.PTRFLAGS_BUTTON1:
+                    if event.slowPathInputData.pointerFlags.value & PduData.PointerFlag.PTRFLAGS_BUTTON1:
                         button = 1
-                    elif event.slowPathInputData.pointerFlags.value & pdu.data.PointerFlag.PTRFLAGS_BUTTON2:
+                    elif event.slowPathInputData.pointerFlags.value & PduData.PointerFlag.PTRFLAGS_BUTTON2:
                         button = 2
-                    elif event.slowPathInputData.pointerFlags.value & pdu.data.PointerFlag.PTRFLAGS_BUTTON3:
+                    elif event.slowPathInputData.pointerFlags.value & PduData.PointerFlag.PTRFLAGS_BUTTON3:
                         button = 3
                     observer.onPointerEvent(event.slowPathInputData.xPos.value, event.slowPathInputData.yPos.value, button, isPressed)
-                elif event.messageType.value == pdu.data.InputMessageType.INPUT_EVENT_MOUSEX:
-                    isPressed = event.slowPathInputData.pointerFlags.value & pdu.data.PointerExFlag.PTRXFLAGS_DOWN
+                elif event.messageType.value == PduData.InputMessageType.INPUT_EVENT_MOUSEX:
+                    isPressed = event.slowPathInputData.pointerFlags.value & PduData.PointerExFlag.PTRXFLAGS_DOWN
                     button = 0
-                    if event.slowPathInputData.pointerFlags.value & pdu.data.PointerExFlag.PTRXFLAGS_BUTTON1:
+                    if event.slowPathInputData.pointerFlags.value & PduData.PointerExFlag.PTRXFLAGS_BUTTON1:
                         button = 4
-                    elif event.slowPathInputData.pointerFlags.value & pdu.data.PointerExFlag.PTRXFLAGS_BUTTON2:
+                    elif event.slowPathInputData.pointerFlags.value & PduData.PointerExFlag.PTRXFLAGS_BUTTON2:
                         button = 5
                     observer.onPointerEvent(event.slowPathInputData.xPos.value, event.slowPathInputData.yPos.value, button, isPressed)
 
-    
+
     def sendUpdate(self, destLeft, destTop, destRight, destBottom, width, height, bitsPerPixel, isCompress, data):
         """
         @summary: send bitmap update
@@ -547,10 +584,10 @@ class RDPServerController(pdu.layer.PDUServerListener):
         """
         if not self._isReady:
             return
-        bitmapData = pdu.data.BitmapData(destLeft, destTop, destRight, destBottom, width, height, bitsPerPixel, data)
+        bitmapData = PduData.BitmapData(destLeft, destTop, destRight, destBottom, width, height, bitsPerPixel, data)
         if isCompress:
-            bitmapData.flags.value = pdu.data.BitmapFlag.BITMAP_COMPRESSION
-        
+            bitmapData.flags.value = PduData.BitmapFlag.BITMAP_COMPRESSION
+
         self._pduLayer.sendBitmapUpdatePDU([bitmapData])
 
 class ClientFactory(layer.RawLayerClientFactory):
@@ -567,7 +604,7 @@ class ClientFactory(layer.RawLayerClientFactory):
         pduLayer = secLayer._presentation
         controller = pduLayer._listener
         controller.onClose()
-        
+
     def buildRawLayer(self, addr):
         """
         @summary: Function call from twisted and build rdp protocol stack
@@ -576,14 +613,14 @@ class ClientFactory(layer.RawLayerClientFactory):
         controller = RDPClientController()
         self.buildObserver(controller, addr)
         return controller.getProtocol()
-    
+
     def buildObserver(self, controller, addr):
         """
         @summary: Build observer use for connection
         @param controller: RDPClientController
         @param addr: destination address
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "buildObserver", "ClientFactory"))
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "buildObserver", "ClientFactory"))
 
 class ServerFactory(layer.RawLayerServerFactory):
     """
@@ -598,7 +635,7 @@ class ServerFactory(layer.RawLayerServerFactory):
         self._colorDepth = colorDepth
         self._privateKeyFileName = privateKeyFileName
         self._certificateFileName = certificateFileName
-    
+
     def connectionLost(self, tpktLayer, reason):
         """
         @param reason: twisted reason
@@ -610,7 +647,7 @@ class ServerFactory(layer.RawLayerServerFactory):
         pduLayer = secLayer._presentation
         controller = pduLayer._listener
         controller.onClose()
-    
+
     def buildRawLayer(self, addr):
         """
         @summary: Function call from twisted and build rdp protocol stack
@@ -619,15 +656,15 @@ class ServerFactory(layer.RawLayerServerFactory):
         controller = RDPServerController(self._colorDepth, self._privateKeyFileName, self._certificateFileName)
         self.buildObserver(controller, addr)
         return controller.getProtocol()
-    
+
     def buildObserver(self, controller, addr):
         """
         @summary: Build observer use for connection
         @param controller: RDP stack controller
         @param addr: destination address
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "buildObserver", "ServerFactory")) 
-        
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "buildObserver", "ServerFactory"))
+
 class RDPClientObserver(object):
     """
     @summary: Class use to inform all RDP event handle by RDPY
@@ -638,25 +675,25 @@ class RDPClientObserver(object):
         """
         self._controller = controller
         self._controller.addClientObserver(self)
-        
+
     def onReady(self):
         """
         @summary: Stack is ready and connected
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "onReady", "RDPClientObserver")) 
-    
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "onReady", "RDPClientObserver"))
+
     def onSessionReady(self):
         """
         @summary: Windows session is ready
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "onSessionReady", "RDPClientObserver")) 
-    
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "onSessionReady", "RDPClientObserver"))
+
     def onClose(self):
         """
         @summary: Stack is closes
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "onClose", "RDPClientObserver")) 
-    
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "onClose", "RDPClientObserver"))
+
     def onUpdate(self, destLeft, destTop, destRight, destBottom, width, height, bitsPerPixel, isCompress, data):
         """
         @summary: Notify bitmap update
@@ -670,8 +707,8 @@ class RDPClientObserver(object):
         @param isCompress: use RLE compression
         @param data: bitmap data
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "onUpdate", "RDPClientObserver"))
-    
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "onUpdate", "RDPClientObserver"))
+
 class RDPServerObserver(object):
     """
     @summary: Class use to inform all RDP event handle by RDPY
@@ -682,20 +719,20 @@ class RDPServerObserver(object):
         """
         self._controller = controller
         self._controller.addServerObserver(self)
-        
+
     def onReady(self):
         """
         @summary: Stack is ready and connected
         May be called after an setColorDepth too
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "onReady", "RDPServerObserver"))
-    
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "onReady", "RDPServerObserver"))
+
     def onClose(self):
         """
         @summary: Stack is closes
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "onClose", "RDPClientObserver")) 
-    
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "onClose", "RDPClientObserver"))
+
     def onKeyEventScancode(self, code, isPressed, isExtended):
         """
         @summary: Event call when a keyboard event is catch in scan code format
@@ -703,16 +740,16 @@ class RDPServerObserver(object):
         @param isPressed: {boolean} True if key is down
         @param isExtended: {boolean} True if a special key
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "onKeyEventScanCode", "RDPServerObserver"))
-    
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "onKeyEventScanCode", "RDPServerObserver"))
+
     def onKeyEventUnicode(self, code, isPressed):
         """
         @summary: Event call when a keyboard event is catch in unicode format
         @param code: unicode of key
         @param isPressed: True if key is down
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "onKeyEventUnicode", "RDPServerObserver"))
-    
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "onKeyEventUnicode", "RDPServerObserver"))
+
     def onPointerEvent(self, x, y, button, isPressed):
         """
         @summary: Event call on mouse event
@@ -721,4 +758,4 @@ class RDPServerObserver(object):
         @param button: 1, 2, 3, 4 or 5 button
         @param isPressed: True if mouse button is pressed
         """
-        raise CallPureVirtualFuntion("%s:%s defined by interface %s"%(self.__class__, "onPointerEvent", "RDPServerObserver"))
+        raise CallPureVirtualFunction("%s:%s defined by interface %s"%(self.__class__, "onPointerEvent", "RDPServerObserver"))
